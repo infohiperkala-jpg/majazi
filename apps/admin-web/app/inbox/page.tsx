@@ -66,6 +66,14 @@ export default function InboxPage() {
       setReply("");await loadMessages();await loadConversations();setNotice("پیام در صف داخلی ثبت شد؛ هنوز به پیام‌رسان ارسال نشده است.");
     });
   }
+  async function createConversation() {
+    const subject=window.prompt("عنوان مکالمه جدید را وارد کنید:");
+    if(subject===null||!subject.trim())return;
+    await run(async()=>{
+      const created=await api<{id:string}>("/api/organizations/"+organizationId+"/inbox/conversations",token,{method:"POST",body:JSON.stringify({subject:subject.trim()})});
+      await loadConversations();setSelected(created.id);setMessages([]);setNotice("مکالمه جدید ایجاد شد.");
+    });
+  }
   async function changeStatus(next:string) {
     await run(async()=>{
       await api("/api/organizations/"+organizationId+"/inbox/conversations/"+selected,token,{method:"PATCH",body:JSON.stringify({status:next})});
@@ -79,7 +87,7 @@ export default function InboxPage() {
     <div className="inbox-toolbar"><label>سازمان<select value={organizationId} onChange={e=>{setOrganizationId(e.target.value);setSelected("");}}>{organizations.map(o=><option key={o.id} value={o.id}>{o.name} · {o.role}</option>)}</select></label><label>جست‌وجوی مکالمه<input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void run(()=>loadConversations());}} placeholder="نام مخاطب یا متن پیام"/></label><button disabled={busy} onClick={()=>void run(()=>loadConversations())}>جست‌وجو</button></div>
     {error&&<div className="inbox-alert" role="alert">{error}</div>}{notice&&<div className="inbox-notice" role="status">{notice}</div>}
     <div className="inbox-layout">
-      <aside className="inbox-list-panel"><div className="inbox-list-heading"><h2>مکالمات</h2><span>{items.length.toLocaleString("en-US")}</span></div><div className="inbox-filters">{[["All","همه"],["Open","باز"],["Pending","در انتظار"],["Resolved","بسته‌شده"]].map(([id,label])=><button key={id} className={status===id?"active":""} onClick={()=>setStatus(id)}>{label}</button>)}</div>
+      <aside className="inbox-list-panel"><div className="inbox-list-heading"><h2>مکالمات</h2><div><span>{items.length.toLocaleString("en-US")}</span><button type="button" className="inbox-new-button" disabled={busy||!organizationId} onClick={()=>void createConversation()}>مکالمه جدید +</button></div></div><div className="inbox-filters">{[["All","همه"],["Open","باز"],["Pending","در انتظار"],["Resolved","بسته‌شده"]].map(([id,label])=><button key={id} className={status===id?"active":""} onClick={()=>setStatus(id)}>{label}</button>)}</div>
         {items.length===0?<div className="inbox-empty-state"><strong>مکالمه‌ای وجود ندارد</strong><p>با دریافت پیام از کانال‌ها یا ایجاد مکالمه، گفتگوها اینجا نمایش داده می‌شوند.</p></div>:items.map(item=><button key={item.id} className={"inbox-conversation "+(selected===item.id?"selected":"")} onClick={()=>setSelected(item.id)}>
           <div className="inbox-conversation-top"><strong>{item.contactName||item.subject||item.channelName||"مکالمه بدون عنوان"}</strong><time>{new Date(item.lastMessageAt).toLocaleDateString("en-US")}</time></div>
           <div className="inbox-conversation-meta"><span>{item.channel||"دستی"}{item.channelName?" · "+item.channelName:""}</span><span className={"inbox-status status-"+item.status.toLowerCase()}>{labels[item.status]??item.status}</span></div>
