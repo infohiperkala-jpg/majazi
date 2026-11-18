@@ -255,7 +255,7 @@ export default function Home() {
       </div>
 
       <div className="section-heading" id="modules"><div><h2>ماژول‌های سامانه</h2><p>ساختار فضای کاری MAJAZI</p></div></div>
-      <div className="module-grid">{modules.map(([name, desc, code]) => {code === "CM" ? <a className="module module-link" href="/campaigns" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قابل استفاده</small></a> : <article className="module" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>در حال توسعه</small></article>})}</div>
+      <div className="module-grid">{modules.map(([name, desc, code]) => code === "CM" ? <a className="module module-link" href="/campaigns" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قابل استفاده</small></a> : <article className="module" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>در حال توسعه</small></article>)}</div>
       <footer>MAJAZI · مرکز هوشمند بازاریابی و فروش</footer>
     </section>
   </main>;
