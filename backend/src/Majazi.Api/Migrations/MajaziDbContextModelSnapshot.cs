@@ -62,6 +62,85 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.ToTable("organizations", (string)null);
         });
 
+
+        modelBuilder.Entity("Majazi.Api.Models.CrmContact", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid?>("BrandId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Email").HasMaxLength(320).HasColumnType("character varying(320)");
+            b.Property<string>("FullName").IsRequired().HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("Company").HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("Notes").HasMaxLength(4000).HasColumnType("character varying(4000)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Phone").HasMaxLength(40).HasColumnType("character varying(40)");
+            b.HasKey("Id");
+            b.HasIndex("BrandId");
+            b.HasIndex("OrganizationId", "CreatedAt");
+            b.ToTable("crm_contacts", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.CrmLead", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid?>("BrandId").HasColumnType("uuid");
+            b.Property<Guid?>("ContactId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<decimal?>("EstimatedValue").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<string>("Notes").HasMaxLength(4000).HasColumnType("character varying(4000)");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Source").HasMaxLength(120).HasColumnType("character varying(120)");
+            b.Property<string>("Stage").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<string>("Title").IsRequired().HasMaxLength(240).HasColumnType("character varying(240)");
+            b.HasKey("Id");
+            b.HasIndex("BrandId");
+            b.HasIndex("ContactId");
+            b.HasIndex("OrganizationId", "Stage", "CreatedAt");
+            b.ToTable("crm_leads", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.CrmActivity", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("ActivityType").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<Guid?>("ContactId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<Guid?>("LeadId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("OccurredAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Summary").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.HasKey("Id");
+            b.HasIndex("ContactId");
+            b.HasIndex("LeadId");
+            b.HasIndex("OrganizationId", "OccurredAt");
+            b.ToTable("crm_activities", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.CrmContact", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Brand", "Brand").WithMany().HasForeignKey("BrandId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Brand"); b.Navigation("Organization");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.CrmLead", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Brand", "Brand").WithMany().HasForeignKey("BrandId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.CrmContact", "Contact").WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Brand"); b.Navigation("Contact"); b.Navigation("Organization");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.CrmActivity", b =>
+        {
+            b.HasOne("Majazi.Api.Models.CrmContact", "Contact").WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.CrmLead", "Lead").WithMany().HasForeignKey("LeadId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Contact"); b.Navigation("Lead"); b.Navigation("Organization");
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.OrganizationMembership", b =>
         {
             b.HasOne("Majazi.Api.Models.Organization", "Organization")
