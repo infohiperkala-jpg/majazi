@@ -5,6 +5,8 @@ using System.Threading.RateLimiting;
 using Majazi.Api.Data;
 using Majazi.Api.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using System.IO;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +23,9 @@ var issuer = builder.Configuration["Jwt:Issuer"] ?? "majazi-api";
 var audience = builder.Configuration["Jwt:Audience"] ?? "majazi-web";
 
 builder.Services.AddDbContext<MajaziDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDataProtection()
+    .SetApplicationName("MAJAZI")
+    .PersistKeysToFileSystem(new DirectoryInfo(builder.Configuration["DataProtection:KeysPath"] ?? "/var/lib/majazi/keys"));
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -535,6 +540,69 @@ campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid ca
     db.MarketingCampaigns.Remove(item); await db.SaveChangesAsync(ct); return Results.NoContent();
 });
 
+
+var channelsApi = app.MapGroup("/api/organizations/{organizationId:guid}/channels").RequireAuthorization();
+var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram"]);
+channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var items = await db.SocialChannelConnections.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+        .OrderBy(x => x.Provider).ThenBy(x => x.DisplayName)
+        .Select(x => new { x.Id, x.BrandId, x.Provider, x.DisplayName, x.ExternalAccountId, x.Status, x.CreatedAt, x.UpdatedAt,
+            HasCredential = x.EncryptedAccessToken != null })
+        .ToListAsync(ct);
+    return Results.Ok(items);
+});
+channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationId, ClaimsPrincipal principal,
+    MajaziDbContext db, IDataProtectionProvider protection, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var provider = request.Provider?.Trim();
+    var displayName = request.DisplayName?.Trim();
+    var externalId = Clean(request.ExternalAccountId);
+    var credential = request.AccessToken?.Trim();
+    if (provider is null || !channelProviders.Contains(provider) || string.IsNullOrWhiteSpace(displayName) ||
+        displayName.Length > 180 || (externalId?.Length ?? 0) > 180 ||
+        (credential is not null && (credential.Length < 8 || credential.Length > 8000)) ||
+        (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct)))
+        return Results.BadRequest(new { error = "اطلاعات کانال یا برند معتبر نیست." });
+    if (await db.SocialChannelConnections.AnyAsync(x => x.OrganizationId == organizationId &&
+        x.Provider == provider && x.ExternalAccountId == externalId, ct))
+        return Results.Conflict(new { error = "این حساب کانال قبلاً در سازمان ثبت شده است." });
+    var protector = protection.CreateProtector("Majazi.SocialConnections.v1");
+    var item = new SocialChannelConnection
+    {
+        OrganizationId = organizationId, BrandId = request.BrandId, Provider = provider,
+        DisplayName = displayName, ExternalAccountId = externalId,
+        EncryptedAccessToken = credential is null ? null : protector.Protect(credential),
+        Status = credential is null ? "PendingAuthorization" : "CredentialsStored"
+    };
+    db.SocialChannelConnections.Add(item);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/channels/{item.Id}",
+        new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
+            HasCredential = item.EncryptedAccessToken != null, item.CreatedAt });
+});
+channelsApi.MapDelete("/{connectionId:guid}", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == connectionId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    db.SocialChannelConnections.Remove(item);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
 app.Run();
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
@@ -575,3 +643,5 @@ public sealed record UpdateLeadStageRequest(string? Stage);
 public sealed record CrmActivityRequest(Guid? ContactId, Guid? LeadId, string? ActivityType, string? Summary, DateTimeOffset? OccurredAt);
 
 public sealed record CampaignRequest(Guid? BrandId, string? Name, string? Objective, string? Channel, string? Status, decimal Budget, DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, string? Notes, decimal ActualSpend = 0, decimal AttributedRevenue = 0, long Impressions = 0, long Clicks = 0, long Conversions = 0);
+
+public sealed record SocialChannelRequest(Guid? BrandId, string? Provider, string? DisplayName, string? ExternalAccountId, string? AccessToken);
