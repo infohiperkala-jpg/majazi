@@ -479,7 +479,7 @@ campaignsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, 
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var items = await db.MarketingCampaigns.AsNoTracking().Where(x => x.OrganizationId == organizationId)
         .OrderByDescending(x => x.UpdatedAt)
-        .Select(x => new { x.Id, x.BrandId, x.Name, x.Objective, x.Channel, x.Status, x.Budget, x.StartsAt, x.EndsAt, x.Notes, x.CreatedAt, x.UpdatedAt })
+        .Select(x => new { x.Id, x.BrandId, x.Name, x.Objective, x.Channel, x.Status, x.Budget, x.ActualSpend, x.AttributedRevenue, x.Impressions, x.Clicks, x.Conversions, x.StartsAt, x.EndsAt, x.Notes, x.CreatedAt, x.UpdatedAt, ClickThroughRate = x.Impressions == 0 ? 0 : Math.Round((double)x.Clicks * 100 / x.Impressions, 2), ConversionRate = x.Clicks == 0 ? 0 : Math.Round((double)x.Conversions * 100 / x.Clicks, 2), ReturnOnAdSpend = x.ActualSpend == 0 ? 0 : Math.Round((double)(x.AttributedRevenue / x.ActualSpend), 2) })
         .ToListAsync(ct);
     return Results.Ok(items);
 });
@@ -492,13 +492,14 @@ campaignsApi.MapPost("/", async (Guid organizationId, CampaignRequest request, C
     if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || channel is null || !campaignChannels.Contains(channel) ||
         !campaignStatuses.Contains(status) || request.Budget < 0 || request.Budget > 9999999999999999m ||
         (request.Objective?.Length ?? 0) > 1000 || (request.Notes?.Length ?? 0) > 4000 ||
+        request.ActualSpend < 0 || request.AttributedRevenue < 0 || request.Impressions < 0 || request.Clicks < 0 || request.Conversions < 0 || request.Clicks > request.Impressions || request.Conversions > request.Clicks ||
         (request.StartsAt.HasValue && request.EndsAt.HasValue && request.EndsAt < request.StartsAt))
         return Results.BadRequest(new { error = "اطلاعات کمپین، بودجه، کانال یا بازه زمانی معتبر نیست." });
     if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
         return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
     var item = new MarketingCampaign { OrganizationId = organizationId, BrandId = request.BrandId, Name = name,
         Objective = Clean(request.Objective), Channel = channel, Status = status, Budget = request.Budget,
-        StartsAt = request.StartsAt, EndsAt = request.EndsAt, Notes = Clean(request.Notes) };
+        StartsAt = request.StartsAt, EndsAt = request.EndsAt, Notes = Clean(request.Notes), ActualSpend = request.ActualSpend, AttributedRevenue = request.AttributedRevenue, Impressions = request.Impressions, Clicks = request.Clicks, Conversions = request.Conversions };
     db.MarketingCampaigns.Add(item); await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/campaigns/{item.Id}", item);
 });
@@ -519,9 +520,9 @@ campaignsApi.MapPut("/{campaignId:guid}", async (Guid organizationId, Guid campa
         return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
     item.Name = name; item.Objective = Clean(request.Objective); item.Channel = channel; item.Status = status;
     item.BrandId = request.BrandId; item.Budget = request.Budget; item.StartsAt = request.StartsAt;
-    item.EndsAt = request.EndsAt; item.Notes = Clean(request.Notes); item.UpdatedAt = DateTimeOffset.UtcNow;
+    item.EndsAt = request.EndsAt; item.Notes = Clean(request.Notes); item.ActualSpend = request.ActualSpend; item.AttributedRevenue = request.AttributedRevenue; item.Impressions = request.Impressions; item.Clicks = request.Clicks; item.Conversions = request.Conversions; item.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
-    return Results.Ok(new { item.Id, item.BrandId, item.Name, item.Objective, item.Channel, item.Status, item.Budget, item.StartsAt, item.EndsAt, item.Notes, item.UpdatedAt });
+    return Results.Ok(new { item.Id, item.BrandId, item.Name, item.Objective, item.Channel, item.Status, item.Budget, item.ActualSpend, item.AttributedRevenue, item.Impressions, item.Clicks, item.Conversions, item.StartsAt, item.EndsAt, item.Notes, item.UpdatedAt });
 });
 
 campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid campaignId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
@@ -572,4 +573,4 @@ public sealed record CrmLeadRequest(Guid? BrandId, Guid? ContactId, string? Titl
 public sealed record UpdateLeadStageRequest(string? Stage);
 public sealed record CrmActivityRequest(Guid? ContactId, Guid? LeadId, string? ActivityType, string? Summary, DateTimeOffset? OccurredAt);
 
-public sealed record CampaignRequest(Guid? BrandId, string? Name, string? Objective, string? Channel, string? Status, decimal Budget, DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, string? Notes);
+public sealed record CampaignRequest(Guid? BrandId, string? Name, string? Objective, string? Channel, string? Status, decimal Budget, DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, string? Notes, decimal ActualSpend = 0, decimal AttributedRevenue = 0, long Impressions = 0, long Clicks = 0, long Conversions = 0);
