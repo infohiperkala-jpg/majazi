@@ -877,6 +877,138 @@ dashboardApi.MapGet("/summary", async (Guid organizationId, ClaimsPrincipal prin
     });
 });
 
+
+var inboxApi = app.MapGroup("/api/organizations/{organizationId:guid}/inbox").RequireAuthorization();
+
+inboxApi.MapGet("/conversations", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    string? status, string? q, int? page, int? pageSize, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var query = db.InboxConversations.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(status) && status != "All")
+        query = query.Where(x => x.Status == status);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        query = query.Where(x => (x.Subject != null && x.Subject.Contains(term)) ||
+            (x.Contact != null && x.Contact.FullName.Contains(term)) ||
+            (x.Messages.OrderByDescending(m => m.CreatedAt).Select(m => m.Body).FirstOrDefault() ?? "").Contains(term));
+    }
+    var total = await query.CountAsync(ct);
+    var currentPage = Math.Clamp(page ?? 1, 1, 10000);
+    var take = Math.Clamp(pageSize ?? 30, 1, 100);
+    var items = await query.OrderByDescending(x => x.LastMessageAt)
+        .Skip((currentPage - 1) * take).Take(take)
+        .Select(x => new
+        {
+            x.Id, x.ChannelConnectionId, x.ContactId, x.ExternalConversationId, x.Subject,
+            x.Status, x.AssignedToUserId, x.LastMessageAt, x.CreatedAt, x.UpdatedAt,
+            Channel = x.ChannelConnection == null ? null : x.ChannelConnection.Provider,
+            ChannelName = x.ChannelConnection == null ? null : x.ChannelConnection.DisplayName,
+            ContactName = x.Contact == null ? null : x.Contact.FullName,
+            MessageCount = x.Messages.Count,
+            LastMessage = x.Messages.OrderByDescending(m => m.CreatedAt).Select(m => m.Body).FirstOrDefault(),
+            LastDirection = x.Messages.OrderByDescending(m => m.CreatedAt).Select(m => m.Direction).FirstOrDefault()
+        }).ToListAsync(ct);
+    return Results.Ok(new { items, total, page = currentPage, pageSize = take });
+});
+
+inboxApi.MapGet("/conversations/{conversationId:guid}/messages", async (Guid organizationId, Guid conversationId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var exists = await db.InboxConversations.AnyAsync(x => x.Id == conversationId && x.OrganizationId == organizationId, ct);
+    if (!exists) return Results.NotFound();
+    var messages = await db.InboxMessages.AsNoTracking().Where(x => x.ConversationId == conversationId)
+        .OrderBy(x => x.CreatedAt)
+        .Select(x => new { x.Id, x.ExternalMessageId, x.Direction, x.Body, x.Status, x.SentAt, x.CreatedAt, x.CreatedByUserId })
+        .Take(500).ToListAsync(ct);
+    return Results.Ok(messages);
+});
+
+inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConversationRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    if (request.ChannelConnectionId is Guid channelId &&
+        !await db.SocialChannelConnections.AnyAsync(x => x.Id == channelId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "کانال انتخاب‌شده متعلق به این سازمان نیست." });
+    if (request.ContactId is Guid contactId &&
+        !await db.CrmContacts.AnyAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "مخاطب انتخاب‌شده متعلق به این سازمان نیست." });
+    var subject = Clean(request.Subject);
+    var externalId = Clean(request.ExternalConversationId);
+    if ((subject?.Length ?? 0) > 240 || (externalId?.Length ?? 0) > 180)
+        return Results.BadRequest(new { error = "طول عنوان یا شناسه مکالمه معتبر نیست." });
+    var item = new InboxConversation
+    {
+        OrganizationId = organizationId, ChannelConnectionId = request.ChannelConnectionId,
+        ContactId = request.ContactId, Subject = subject, ExternalConversationId = externalId,
+        Status = "Open", LastMessageAt = DateTimeOffset.UtcNow
+    };
+    db.InboxConversations.Add(item);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/inbox/conversations/{item.Id}",
+        new { item.Id, item.Subject, item.Status, item.ChannelConnectionId, item.ContactId, item.CreatedAt });
+});
+
+inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid organizationId, Guid conversationId,
+    CreateInboxMessageRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var conversation = await db.InboxConversations.SingleOrDefaultAsync(
+        x => x.Id == conversationId && x.OrganizationId == organizationId, ct);
+    if (conversation is null) return Results.NotFound();
+    var body = request.Body?.Trim();
+    if (string.IsNullOrWhiteSpace(body) || body.Length > 10000)
+        return Results.BadRequest(new { error = "متن پیام الزامی است و حداکثر 10000 کاراکتر می‌تواند باشد." });
+    if (conversation.Status == "Resolved")
+        return Results.Conflict(new { error = "مکالمه بسته شده است؛ ابتدا وضعیت آن را به باز تغییر دهید." });
+    var message = new InboxMessage
+    {
+        ConversationId = conversationId, Direction = "Outbound", Body = body,
+        Status = "Queued", CreatedByUserId = userId.Value
+    };
+    db.InboxMessages.Add(message);
+    conversation.LastMessageAt = message.CreatedAt;
+    conversation.UpdatedAt = DateTimeOffset.UtcNow;
+    conversation.Status = "Pending";
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/inbox/conversations/{conversationId}/messages/{message.Id}",
+        new { message.Id, message.Direction, message.Body, message.Status, message.CreatedAt,
+            deliveryNote = "پیام در صف داخلی ثبت شد؛ تا زمان فعال‌سازی ارسال‌گر رسمی کانال، به مقصد ارسال نشده است." });
+});
+
+inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizationId, Guid conversationId,
+    UpdateInboxConversationRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var item = await db.InboxConversations.SingleOrDefaultAsync(
+        x => x.Id == conversationId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    if (request.Status is not null)
+    {
+        if (request.Status is not ("Open" or "Pending" or "Resolved"))
+            return Results.BadRequest(new { error = "وضعیت مکالمه معتبر نیست." });
+        item.Status = request.Status;
+    }
+    if (request.AssignedToUserId.HasValue)
+    {
+        var assignee = request.AssignedToUserId.Value;
+        if (assignee != Guid.Empty && !await IsMember(db, assignee, organizationId, ct))
+            return Results.BadRequest(new { error = "مسئول انتخاب‌شده عضو این سازمان نیست." });
+        item.AssignedToUserId = assignee == Guid.Empty ? null : assignee;
+    }
+    item.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { item.Id, item.Status, item.AssignedToUserId, item.UpdatedAt });
+});
+
 app.Run();
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
@@ -919,5 +1051,10 @@ public sealed record CrmActivityRequest(Guid? ContactId, Guid? LeadId, string? A
 public sealed record CampaignRequest(Guid? BrandId, string? Name, string? Objective, string? Channel, string? Status, decimal Budget, DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, string? Notes, decimal ActualSpend = 0, decimal AttributedRevenue = 0, long Impressions = 0, long Clicks = 0, long Conversions = 0);
 
 public sealed record SocialChannelRequest(Guid? BrandId, string? Provider, string? DisplayName, string? ExternalAccountId, string? AccessToken);
+
+public sealed record CreateInboxConversationRequest(Guid? ChannelConnectionId, Guid? ContactId, string? ExternalConversationId, string? Subject);
+public sealed record CreateInboxMessageRequest(string? Body);
+public sealed record UpdateInboxConversationRequest(string? Status, Guid? AssignedToUserId);
+
 
 record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string DisplayName);
