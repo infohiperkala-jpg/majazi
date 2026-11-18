@@ -39,3 +39,53 @@ public sealed class OrganizationMembership
     public AppUser? User { get; set; }
     public Organization? Organization { get; set; }
 }
+
+
+public sealed class CrmContact
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BrandId { get; set; }
+    public required string FullName { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string? Company { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Organization? Organization { get; set; }
+    public Brand? Brand { get; set; }
+}
+
+public sealed class CrmLead
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BrandId { get; set; }
+    public Guid? ContactId { get; set; }
+    public required string Title { get; set; }
+    public string Stage { get; set; } = "New";
+    public decimal? EstimatedValue { get; set; }
+    public string? Source { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Organization? Organization { get; set; }
+    public Brand? Brand { get; set; }
+    public CrmContact? Contact { get; set; }
+}
+
+public sealed class CrmActivity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? ContactId { get; set; }
+    public Guid? LeadId { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public required string ActivityType { get; set; }
+    public required string Summary { get; set; }
+    public DateTimeOffset OccurredAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Organization? Organization { get; set; }
+    public CrmContact? Contact { get; set; }
+    public CrmLead? Lead { get; set; }
+}
