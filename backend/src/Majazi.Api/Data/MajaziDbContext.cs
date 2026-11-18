@@ -14,6 +14,8 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<CrmActivity> CrmActivities => Set<CrmActivity>();
     public DbSet<MarketingCampaign> MarketingCampaigns => Set<MarketingCampaign>();
     public DbSet<SocialChannelConnection> SocialChannelConnections => Set<SocialChannelConnection>();
+    public DbSet<InboxConversation> InboxConversations => Set<InboxConversation>();
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -101,6 +103,32 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.HasIndex(x => new { x.OrganizationId, x.Status });
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+
+        modelBuilder.Entity<InboxConversation>(e =>
+        {
+            e.ToTable("inbox_conversations"); e.HasKey(x => x.Id);
+            e.Property(x => x.ExternalConversationId).HasMaxLength(180);
+            e.Property(x => x.Subject).HasMaxLength(240);
+            e.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.Status, x.LastMessageAt });
+            e.HasIndex(x => new { x.ChannelConnectionId, x.ExternalConversationId }).IsUnique();
+            e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ChannelConnection).WithMany().HasForeignKey(x => x.ChannelConnectionId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Contact).WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<InboxMessage>(e =>
+        {
+            e.ToTable("inbox_messages"); e.HasKey(x => x.Id);
+            e.Property(x => x.ExternalMessageId).HasMaxLength(180);
+            e.Property(x => x.Direction).HasMaxLength(12).IsRequired();
+            e.Property(x => x.Body).HasMaxLength(10000).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            e.Property(x => x.ProviderPayload).HasColumnType("jsonb");
+            e.HasIndex(x => new { x.ConversationId, x.CreatedAt });
+            e.HasIndex(x => new { x.ConversationId, x.ExternalMessageId }).IsUnique();
+            e.HasOne(x => x.Conversation).WithMany(x => x.Messages).HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<CrmActivity>(e =>
