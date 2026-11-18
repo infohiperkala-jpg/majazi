@@ -53,9 +53,25 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authOrgName, setAuthOrgName] = useState("");
-  const [authOrgSlug, setAuthOrgSlug] = useState("");
+  const [captchaId, setCaptchaId] = useState("");
+  const [captchaImage, setCaptchaImage] = useState("");
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [captchaBusy, setCaptchaBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
+
+  async function refreshCaptcha() {
+    setCaptchaBusy(true);
+    try {
+      const challenge = await api<{ captchaId: string; imageDataUrl: string }>("/api/auth/captcha");
+      setCaptchaId(challenge.captchaId);
+      setCaptchaImage(challenge.imageDataUrl);
+      setCaptchaAnswer("");
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : "دریافت تصویر امنیتی ناموفق بود.");
+    } finally { setCaptchaBusy(false); }
+  }
 
   const loadOrganizations = useCallback(async () => {
     setLoading(true);
@@ -70,6 +86,10 @@ export default function Home() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (authMode === "register") void refreshCaptcha();
+  }, [authMode]);
 
   useEffect(() => {
     setAuthenticated(Boolean(localStorage.getItem("majazi_access_token")));
@@ -93,7 +113,7 @@ export default function Home() {
     try {
       const payload = authMode === "login"
         ? { email: authEmail, password: authPassword }
-        : { email: authEmail, password: authPassword, organizationName: authOrgName, organizationSlug: authOrgSlug };
+        : { email: authEmail, password: authPassword, organizationName: authOrgName, captchaId, captchaAnswer };
       const result = await api<{ accessToken: string }>(authMode === "login" ? "/api/auth/login" : "/api/auth/register", {
         method: "POST", body: JSON.stringify(payload),
       });
@@ -101,6 +121,7 @@ export default function Home() {
       setAuthenticated(true);
     } catch (e) {
       setAuthError(e instanceof Error ? e.message : "ورود یا ثبت‌نام انجام نشد.");
+      if (authMode === "register") await refreshCaptcha();
     } finally { setAuthBusy(false); }
   }
 
@@ -186,14 +207,15 @@ export default function Home() {
       {authError && <div className="feedback error" role="alert">{authError}</div>}
       <form className="data-form" onSubmit={submitAuth}>
         <label>ایمیل<input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} autoComplete="email" required dir="ltr" placeholder="name@example.com" /></label>
-        <label>گذرواژه<input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete={authMode === "login" ? "current-password" : "new-password"} minLength={authMode === "register" ? 12 : 1} required dir="ltr" placeholder={authMode === "register" ? "حداقل ۱۲ نویسه، حروف بزرگ و کوچک و عدد" : "گذرواژه"} /></label>
+        <label>گذرواژه<div className="password-field"><input type={showPassword ? "text" : "password"} value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete={authMode === "login" ? "current-password" : "new-password"} minLength={authMode === "register" ? 12 : 1} required dir="ltr" placeholder={authMode === "register" ? "حداقل ۱۲ نویسه، حروف بزرگ و کوچک و عدد" : "گذرواژه"} /><button type="button" className="password-toggle" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? "مخفی کردن گذرواژه" : "نمایش گذرواژه"}>{showPassword ? "مخفی" : "نمایش"}</button></div></label>
         {authMode === "register" && <>
           <label>نام سازمان<input value={authOrgName} onChange={e => setAuthOrgName(e.target.value)} maxLength={180} required placeholder="نام سازمان شما" /></label>
-          <label>شناسه یکتای سازمان<input value={authOrgSlug} onChange={e => setAuthOrgSlug(e.target.value)} maxLength={100} required dir="ltr" placeholder="my-company" /></label>
+          <div className="generated-id-note">شناسه یکتای سازمان به‌صورت خودکار و غیرتکراری توسط سامانه ساخته می‌شود.</div>
+          <div className="captcha-box"><div className="captcha-heading"><span>کد امنیتی تصویری</span><button type="button" onClick={() => void refreshCaptcha()} disabled={captchaBusy}>تغییر تصویر</button></div><div className="captcha-image">{captchaImage ? <img src={captchaImage} alt="کد امنیتی تصویری" /> : <span>در حال دریافت تصویر…</span>}</div><label>اعداد داخل تصویر را وارد کنید<input value={captchaAnswer} onChange={e => setCaptchaAnswer(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" autoComplete="off" required dir="ltr" maxLength={5} placeholder="۵ رقم" /></label></div>
         </>}
         <button type="submit" disabled={authBusy}>{authBusy ? "لطفاً صبر کنید…" : authMode === "login" ? "ورود امن" : "ایجاد حساب و سازمان"}</button>
       </form>
-      <button type="button" className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>
+      <button type="button" className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); setShowPassword(false); }}>
         {authMode === "login" ? "حساب ندارید؟ ثبت‌نام کنید" : "قبلاً حساب ساخته‌اید؟ وارد شوید"}
       </button>
     </section>
