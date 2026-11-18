@@ -46,3 +46,7 @@
 .inbox-empty-state strong{font-size:13px;color:#56657d}.inbox-footer{text-align:center;color:#a1aabc;font-size:9px;letter-spacing:1px;padding:24px 0 5px}
 .inbox-empty{max-width:600px;margin:15vh auto;background:white;border:1px solid #e8edf5;border-radius:18px}.inbox-empty h1{color:#243453}
 @media(max-width:850px){.inbox-shell{padding:22px 12px}.inbox-header{align-items:flex-start}.inbox-toolbar{flex-wrap:wrap}.inbox-toolbar label{flex:1;min-width:145px}.inbox-layout{grid-template-columns:1fr}.inbox-list-panel{max-height:460px;overflow:auto}.inbox-chat-panel{min-height:570px}.inbox-message{max-width:90%}}
+
+.inbox-list-heading>div{display:flex;align-items:center;gap:10px}
+.inbox-new-button{border:0;border-radius:8px;background:#304fb1;color:white;padding:8px 10px;font-size:10px;font-weight:750;cursor:pointer}
+.inbox-new-button:disabled{opacity:.5;cursor:not-allowed}
