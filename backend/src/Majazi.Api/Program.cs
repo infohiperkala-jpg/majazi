@@ -468,6 +468,71 @@ crmApi.MapPost("/activities", async (Guid organizationId, CrmActivityRequest req
     return Results.Created($"/api/organizations/{organizationId}/crm/activities/{item.Id}", new { item.Id, item.ContactId, item.LeadId, item.ActivityType, item.Summary, item.OccurredAt, item.CreatedByUserId });
 });
 
+
+var campaignStatuses = new HashSet<string>(["Draft", "Scheduled", "Active", "Paused", "Completed", "Cancelled"]);
+var campaignChannels = new HashSet<string>(["Website", "Instagram", "Telegram", "Email", "SMS", "Ads", "Offline", "Other"]);
+var campaignsApi = app.MapGroup("/api/organizations/{organizationId:guid}/campaigns").RequireAuthorization();
+
+campaignsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var items = await db.MarketingCampaigns.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+        .OrderByDescending(x => x.UpdatedAt)
+        .Select(x => new { x.Id, x.BrandId, x.Name, x.Objective, x.Channel, x.Status, x.Budget, x.StartsAt, x.EndsAt, x.Notes, x.CreatedAt, x.UpdatedAt })
+        .ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+campaignsApi.MapPost("/", async (Guid organizationId, CampaignRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var name = request.Name?.Trim(); var channel = request.Channel?.Trim(); var status = request.Status?.Trim() ?? "Draft";
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || channel is null || !campaignChannels.Contains(channel) ||
+        !campaignStatuses.Contains(status) || request.Budget < 0 || request.Budget > 9999999999999999m ||
+        (request.Objective?.Length ?? 0) > 1000 || (request.Notes?.Length ?? 0) > 4000 ||
+        (request.StartsAt.HasValue && request.EndsAt.HasValue && request.EndsAt < request.StartsAt))
+        return Results.BadRequest(new { error = "اطلاعات کمپین، بودجه، کانال یا بازه زمانی معتبر نیست." });
+    if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    var item = new MarketingCampaign { OrganizationId = organizationId, BrandId = request.BrandId, Name = name,
+        Objective = Clean(request.Objective), Channel = channel, Status = status, Budget = request.Budget,
+        StartsAt = request.StartsAt, EndsAt = request.EndsAt, Notes = Clean(request.Notes) };
+    db.MarketingCampaigns.Add(item); await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/campaigns/{item.Id}", item);
+});
+
+campaignsApi.MapPut("/{campaignId:guid}", async (Guid organizationId, Guid campaignId, CampaignRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var item = await db.MarketingCampaigns.SingleOrDefaultAsync(x => x.Id == campaignId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    var name = request.Name?.Trim(); var channel = request.Channel?.Trim(); var status = request.Status?.Trim() ?? item.Status;
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || channel is null || !campaignChannels.Contains(channel) ||
+        !campaignStatuses.Contains(status) || request.Budget < 0 || request.Budget > 9999999999999999m ||
+        (request.Objective?.Length ?? 0) > 1000 || (request.Notes?.Length ?? 0) > 4000 ||
+        (request.StartsAt.HasValue && request.EndsAt.HasValue && request.EndsAt < request.StartsAt))
+        return Results.BadRequest(new { error = "اطلاعات کمپین، بودجه، کانال یا بازه زمانی معتبر نیست." });
+    if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    item.Name = name; item.Objective = Clean(request.Objective); item.Channel = channel; item.Status = status;
+    item.BrandId = request.BrandId; item.Budget = request.Budget; item.StartsAt = request.StartsAt;
+    item.EndsAt = request.EndsAt; item.Notes = Clean(request.Notes); item.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { item.Id, item.BrandId, item.Name, item.Objective, item.Channel, item.Status, item.Budget, item.StartsAt, item.EndsAt, item.Notes, item.UpdatedAt });
+});
+
+campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid campaignId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var item = await db.MarketingCampaigns.SingleOrDefaultAsync(x => x.Id == campaignId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    db.MarketingCampaigns.Remove(item); await db.SaveChangesAsync(ct); return Results.NoContent();
+});
+
 app.Run();
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
@@ -506,3 +571,5 @@ public sealed record CrmContactRequest(Guid? BrandId, string? FullName, string? 
 public sealed record CrmLeadRequest(Guid? BrandId, Guid? ContactId, string? Title, string? Stage, decimal? EstimatedValue, string? Source, string? Notes);
 public sealed record UpdateLeadStageRequest(string? Stage);
 public sealed record CrmActivityRequest(Guid? ContactId, Guid? LeadId, string? ActivityType, string? Summary, DateTimeOffset? OccurredAt);
+
+public sealed record CampaignRequest(Guid? BrandId, string? Name, string? Objective, string? Channel, string? Status, decimal Budget, DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, string? Notes);
