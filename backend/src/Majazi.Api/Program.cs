@@ -46,6 +46,34 @@ app.MapPost("/api/organizations", async (CreateOrganizationRequest request, Maja
     return Results.Created($"/api/organizations/{item.Id}", new { item.Id, item.Name, item.Slug, item.CreatedAt });
 });
 
+app.MapPut("/api/organizations/{id:guid}", async (Guid id, CreateOrganizationRequest request, MajaziDbContext db, CancellationToken ct) =>
+{
+    var item = await db.Organizations.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (item is null) return Results.NotFound(new { error = "سازمان پیدا نشد." });
+    var name = request.Name?.Trim();
+    var slug = request.Slug?.Trim().ToLowerInvariant();
+    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(slug))
+        return Results.BadRequest(new { error = "نام و شناسه سازمان الزامی است." });
+    if (name.Length > 180 || slug.Length > 100)
+        return Results.BadRequest(new { error = "طول نام یا شناسه سازمان بیش از حد مجاز است." });
+    if (await db.Organizations.AnyAsync(x => x.Id != id && x.Slug == slug, ct))
+        return Results.Conflict(new { error = "این شناسه سازمان قبلاً ثبت شده است." });
+    item.Name = name;
+    item.Slug = slug;
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateException) { return Results.Conflict(new { error = "شناسه سازمان تکراری است." }); }
+    return Results.Ok(new { item.Id, item.Name, item.Slug, item.CreatedAt });
+});
+
+app.MapDelete("/api/organizations/{id:guid}", async (Guid id, MajaziDbContext db, CancellationToken ct) =>
+{
+    var item = await db.Organizations.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (item is null) return Results.NotFound(new { error = "سازمان پیدا نشد." });
+    db.Organizations.Remove(item);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
 app.MapGet("/api/organizations/{id:guid}/brands", async (Guid id, MajaziDbContext db, CancellationToken ct) =>
 {
     if (!await db.Organizations.AnyAsync(x => x.Id == id, ct))
@@ -71,6 +99,34 @@ app.MapPost("/api/organizations/{id:guid}/brands", async (Guid id, CreateBrandRe
     db.Brands.Add(item);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/brands/{item.Id}", new { item.Id, item.OrganizationId, item.Name, item.Slug, item.CreatedAt });
+});
+
+app.MapPut("/api/brands/{id:guid}", async (Guid id, CreateBrandRequest request, MajaziDbContext db, CancellationToken ct) =>
+{
+    var item = await db.Brands.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (item is null) return Results.NotFound(new { error = "برند پیدا نشد." });
+    var name = request.Name?.Trim();
+    var slug = request.Slug?.Trim().ToLowerInvariant();
+    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(slug))
+        return Results.BadRequest(new { error = "نام و شناسه برند الزامی است." });
+    if (name.Length > 180 || slug.Length > 100)
+        return Results.BadRequest(new { error = "طول نام یا شناسه برند بیش از حد مجاز است." });
+    if (await db.Brands.AnyAsync(x => x.Id != id && x.OrganizationId == item.OrganizationId && x.Slug == slug, ct))
+        return Results.Conflict(new { error = "این شناسه برند قبلاً در سازمان ثبت شده است." });
+    item.Name = name;
+    item.Slug = slug;
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateException) { return Results.Conflict(new { error = "شناسه برند تکراری است." }); }
+    return Results.Ok(new { item.Id, item.OrganizationId, item.Name, item.Slug, item.CreatedAt });
+});
+
+app.MapDelete("/api/brands/{id:guid}", async (Guid id, MajaziDbContext db, CancellationToken ct) =>
+{
+    var item = await db.Brands.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (item is null) return Results.NotFound(new { error = "برند پیدا نشد." });
+    db.Brands.Remove(item);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
 });
 
 app.Run();
