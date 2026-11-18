@@ -66,6 +66,21 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.ToTable("organization_memberships", (string)null);
         });
 
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
+        {
+            b.HasOne("Majazi.Api.Models.SocialChannelConnection", "ChannelConnection").WithMany().HasForeignKey("ChannelConnectionId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.CrmContact", "Contact").WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("ChannelConnection"); b.Navigation("Contact"); b.Navigation("Organization");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxMessage", b =>
+        {
+            b.HasOne("Majazi.Api.Models.InboxConversation", "Conversation").WithMany("Messages").HasForeignKey("ConversationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Conversation");
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.Brand", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -151,6 +166,45 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasIndex("BrandId");
             b.HasIndex("OrganizationId", "Status", "StartsAt");
             b.ToTable("marketing_campaigns", (string)null);
+        });
+
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid?>("AssignedToUserId").HasColumnType("uuid");
+            b.Property<Guid?>("ChannelConnectionId").HasColumnType("uuid");
+            b.Property<Guid?>("ContactId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<DateTimeOffset>("LastMessageAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("ExternalConversationId").HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("Status").IsRequired().HasMaxLength(24).HasColumnType("character varying(24)");
+            b.Property<string>("Subject").HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("ChannelConnectionId", "ExternalConversationId").IsUnique();
+            b.HasIndex("ContactId");
+            b.HasIndex("OrganizationId", "Status", "LastMessageAt");
+            b.ToTable("inbox_conversations", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxMessage", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("Body").IsRequired().HasMaxLength(10000).HasColumnType("character varying(10000)");
+            b.Property<Guid?>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("ConversationId").HasColumnType("uuid");
+            b.Property<string>("Direction").IsRequired().HasMaxLength(12).HasColumnType("character varying(12)");
+            b.Property<string>("ExternalMessageId").HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("ProviderPayload").HasColumnType("jsonb");
+            b.Property<string>("Status").IsRequired().HasMaxLength(24).HasColumnType("character varying(24)");
+            b.Property<DateTimeOffset?>("SentAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("ConversationId", "CreatedAt");
+            b.HasIndex("ConversationId", "ExternalMessageId").IsUnique();
+            b.ToTable("inbox_messages", (string)null);
         });
 
         modelBuilder.Entity("Majazi.Api.Models.CrmActivity", b =>
