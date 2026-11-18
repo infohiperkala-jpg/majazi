@@ -250,7 +250,7 @@ export default function Home() {
       <a className="nav" href="#modules"><span>۸.</span> مرکز پیام‌ها و مکالمات</a>
       <a className="nav" href="#modules"><span>۹.</span> مرکز تماس هوشمند</a>
       <a className="nav" href="#modules"><span>۱۰.</span> مدیریت اپراتورهای هوشمند</a>
-      <a className="nav" href="#modules"><span>۱۱.</span> مدیریت مشتریان</a>
+      <a className="nav" href="/crm"><span>۱۱.</span> مدیریت مشتریان</a>
       <a className="nav" href="#modules"><span>۱۲.</span> مدیریت سرنخ‌های فروش</a>
       <a className="nav" href="#modules"><span>۱۳.</span> مدیریت فرصت‌های فروش</a>
       <a className="nav" href="#modules"><span>۱۴.</span> مدیریت سفارش‌ها و پرداخت‌ها</a>
@@ -318,7 +318,7 @@ export default function Home() {
       </div>
 
       <div className="section-heading" id="modules"><div><h2>ماژول‌های سامانه</h2><p>ساختار فضای کاری MAJAZI</p></div></div>
-      <div className="module-grid">{modules.map(([name, desc, code]) => code === "CM" ? <a className="module module-link" href="/campaigns" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قابل استفاده</small></a> : <article className="module" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>در حال توسعه</small></article>)}</div>
+      <div className="module-grid">{modules.map(([name, desc, code]) => code === "CM" ? <a className="module module-link" href="/campaigns" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قابل استفاده</small></a> : code === "CR" ? <a className="module module-link" href="/crm" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · CRM</small></a> : <article className="module" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>در حال توسعه</small></article>)}</div>
       <footer>MAJAZI · مرکز هوشمند بازاریابی و فروش</footer>
     </section>
   </main>;
