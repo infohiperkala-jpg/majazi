@@ -14,6 +14,31 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.AppUser", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Email").IsRequired().HasMaxLength(320).HasColumnType("character varying(320)");
+            b.Property<bool>("IsActive").HasColumnType("boolean");
+            b.Property<string>("PasswordHash").IsRequired().HasMaxLength(512).HasColumnType("character varying(512)");
+            b.HasKey("Id");
+            b.HasIndex("Email").IsUnique();
+            b.ToTable("app_users", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.OrganizationMembership", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Role").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<Guid>("UserId").HasColumnType("uuid");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId");
+            b.HasIndex("UserId", "OrganizationId").IsUnique();
+            b.ToTable("organization_memberships", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.Brand", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -37,6 +62,22 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.ToTable("organizations", (string)null);
         });
 
+        modelBuilder.Entity("Majazi.Api.Models.OrganizationMembership", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Organization", "Organization")
+                .WithMany("Memberships")
+                .HasForeignKey("OrganizationId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            b.HasOne("Majazi.Api.Models.AppUser", "User")
+                .WithMany()
+                .HasForeignKey("UserId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            b.Navigation("Organization");
+            b.Navigation("User");
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.Brand", b =>
         {
             b.HasOne("Majazi.Api.Models.Organization", "Organization")
@@ -50,6 +91,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         modelBuilder.Entity("Majazi.Api.Models.Organization", b =>
         {
             b.Navigation("Brands");
+            b.Navigation("Memberships");
         });
     }
 }
