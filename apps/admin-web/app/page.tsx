@@ -203,7 +203,7 @@ export default function Home() {
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">م</span><div><strong>MAJAZI</strong><small>هوشمندتر بازاریابی کن</small></div></div>
       <div className="side-label">فضای کاری</div>
-      <a className="nav active" href="/">نمای کلی</a><a className="nav" href="#organizations">سازمان‌ها و برندها</a><a className="nav" href="/crm">مرکز CRM</a><a className="nav" href="/campaigns">مدیریت کمپین‌ها</a><a className="nav" href="#modules">همه ماژول‌ها</a><a className="nav" href="#status">وضعیت سامانه</a>
+      <a className="nav active" href="/">نمای کلی</a><a className="nav" href="#organizations">سازمان‌ها و برندها</a><a className="nav" href="/crm">مرکز CRM</a><a className="nav" href="/campaigns">مدیریت کمپین‌ها</a><a className="nav" href="/channels">اتصال شبکه‌ها</a><a className="nav" href="#modules">همه ماژول‌ها</a><a className="nav" href="#status">وضعیت سامانه</a>
       <div className="sidebar-bottom"><i/> هسته سامانه در حال توسعه</div>
     </aside>
     <section className="content">
@@ -213,7 +213,7 @@ export default function Home() {
       <div className="stats">
         <article className="stat"><span>سازمان‌ها</span><strong>{loading ? "…" : organizations.length}</strong><small>ثبت‌شده در سامانه</small></article>
         <article className="stat"><span>برندهای سازمان منتخب</span><strong>{brands.length}</strong><small>برندهای سازمان انتخاب‌شده</small></article>
-        <article className="stat"><span>کانال‌های متصل</span><strong>۰</strong><small>هنوز اتصالی تأیید نشده</small></article>
+        <article className="stat"><span>کانال‌های ثبت‌شده</span><strong>—</strong><small>مشاهده در بخش اتصال شبکه‌ها</small></article>
         <article className="stat"><span>عامل‌های فعال AI</span><strong>۰</strong><small>پس از پیکربندی فعال می‌شوند</small></article>
       </div>
 
