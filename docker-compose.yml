@@ -22,6 +22,8 @@ services:
       postgres: { condition: service_healthy }
   web:
     build: ./apps/admin-web
+    environment:
+      API_INTERNAL_URL: http://api:8080
     ports: ["3000:3000"]
     depends_on: [api]
 volumes:
