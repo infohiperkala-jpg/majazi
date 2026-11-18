@@ -72,7 +72,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasOne("Majazi.Api.Models.SocialChannelConnection", "ChannelConnection").WithMany().HasForeignKey("ChannelConnectionId").OnDelete(DeleteBehavior.SetNull);
             b.HasOne("Majazi.Api.Models.CrmContact", "Contact").WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
             b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
-            b.Navigation("ChannelConnection"); b.Navigation("Contact"); b.Navigation("Organization");
+            b.Navigation("ChannelConnection"); b.Navigation("Contact"); b.Navigation("Organization"); b.Navigation("Messages");
         });
 
         modelBuilder.Entity("Majazi.Api.Models.InboxMessage", b =>
