@@ -8,7 +8,7 @@ type Organization = { id: string; name: string; role: string };
 type Brand = { id: string; name: string };
 type Channel = { id: string; brandId?: string | null; provider: string; displayName: string; externalAccountId?: string | null; status: string; hasCredential: boolean; createdAt: string };
 const providers = [{ id: "Instagram", label: "اینستاگرام" }, { id: "Facebook", label: "فیسبوک" }, { id: "Telegram", label: "تلگرام" }];
-const statusLabel: Record<string, string> = { PendingAuthorization: "در انتظار مجوز رسمی", CredentialsStored: "اعتبارنامه ذخیره شده؛ اتصال تأیید نشده" };
+const statusLabel: Record<string, string> = { PendingAuthorization: "در انتظار مجوز رسمی", CredentialsStored: "اعتبارنامه ذخیره شده؛ اتصال تأیید نشده", Connected: "متصل و تأییدشده", VerificationFailed: "اعتبارسنجی ناموفق" };
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const response = await fetch("/backend-api" + path, { ...init, headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, ...init?.headers }, cache: "no-store" });
   const data = await response.json().catch(() => null);
@@ -63,7 +63,7 @@ export default function ChannelsPage() {
       await reload(); setNotice("اطلاعات کانال به‌صورت امن ثبت شد. وضعیت اتصال باید پس از OAuth یا اعتبارسنجی رسمی تأیید شود.");
     });
   }
-  async function remove(item: Channel) {
+  async function verify(item: Channel) {\n    await run(async () => {\n      const result = await request<{ username?: string; status: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/verify", token, { method: "POST" });\n      await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));\n    });\n  }\n  async function remove(item: Channel) {
     if (!window.confirm("اتصال ثبت‌شده «" + item.displayName + "» حذف شود؟")) return;
     await run(async () => { await request("/api/organizations/" + organizationId + "/channels/" + item.id, token, { method: "DELETE" }); await reload(); setNotice("اطلاعات اتصال حذف شد."); });
   }
@@ -85,7 +85,7 @@ export default function ChannelsPage() {
       {items.length === 0 ? <p className="channels-empty">هنوز کانالی برای این سازمان ثبت نشده است.</p> : <div className="channels-list">{items.map(item => <article className="channel-card" key={item.id}>
         <div className="channel-mark">{item.provider === "Telegram" ? "TG" : item.provider === "Facebook" ? "FB" : "IG"}</div>
         <div className="channel-info"><strong>{item.displayName}</strong><span>{providers.find(x => x.id === item.provider)?.label ?? item.provider}{item.externalAccountId ? " · " + item.externalAccountId : ""}</span><small>{statusLabel[item.status] ?? item.status}{item.hasCredential ? " · دارای اعتبارنامه رمز‌شده" : " · بدون اعتبارنامه"}</small></div>
-        <button type="button" className="channels-delete" disabled={busy} onClick={() => void remove(item)}>حذف</button>
+        <div className="channel-actions">{item.provider === "Telegram" && item.hasCredential && <button type="button" className="channels-verify" disabled={busy} onClick={() => void verify(item)}>بررسی اتصال</button>}<button type="button" className="channels-delete" disabled={busy} onClick={() => void remove(item)}>حذف</button></div>
       </article>)}</div>}
     </section>
     <footer>MAJAZI CHANNELS · داده‌ها در محدوده سازمان انتخاب‌شده نگهداری می‌شوند.</footer>
