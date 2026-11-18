@@ -514,6 +514,7 @@ campaignsApi.MapPut("/{campaignId:guid}", async (Guid organizationId, Guid campa
     if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || channel is null || !campaignChannels.Contains(channel) ||
         !campaignStatuses.Contains(status) || request.Budget < 0 || request.Budget > 9999999999999999m ||
         (request.Objective?.Length ?? 0) > 1000 || (request.Notes?.Length ?? 0) > 4000 ||
+        request.ActualSpend < 0 || request.AttributedRevenue < 0 || request.Impressions < 0 || request.Clicks < 0 || request.Conversions < 0 || request.Clicks > request.Impressions || request.Conversions > request.Clicks ||
         (request.StartsAt.HasValue && request.EndsAt.HasValue && request.EndsAt < request.StartsAt))
         return Results.BadRequest(new { error = "اطلاعات کمپین، بودجه، کانال یا بازه زمانی معتبر نیست." });
     if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
