@@ -68,7 +68,8 @@ export default function ChannelsPage() {
       const result = await request<{ username?: string; status: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/verify", token, { method: "POST" });
       await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));
     });
-  }\n  async function remove(item: Channel) {
+  }
+  async function remove(item: Channel) {
     if (!window.confirm("اتصال ثبت‌شده «" + item.displayName + "» حذف شود؟")) return;
     await run(async () => { await request("/api/organizations/" + organizationId + "/channels/" + item.id, token, { method: "DELETE" }); await reload(); setNotice("اطلاعات اتصال حذف شد."); });
   }
