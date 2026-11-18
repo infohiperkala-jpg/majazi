@@ -30,6 +30,7 @@ export default function CrmPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [company, setCompany] = useState("");
+  const [contactNotes, setContactNotes] = useState("");
   const [leadTitle, setLeadTitle] = useState("");
   const [leadContactId, setLeadContactId] = useState("");
   const [leadValue, setLeadValue] = useState("");
@@ -71,14 +72,14 @@ export default function CrmPage() {
   async function createContact(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await run(async () => {
-      await request("/api/organizations/" + organizationId + "/crm/contacts" + (editingContactId ? "/" + editingContactId : ""), token, { method: editingContactId ? "PUT" : "POST", body: JSON.stringify({ fullName, email, phone, company }) });
-      setFullName(""); setEmail(""); setPhone(""); setCompany(""); setEditingContactId(""); await reload(); setNotice(editingContactId ? "اطلاعات مخاطب ویرایش شد." : "مخاطب ثبت شد.");
+      await request("/api/organizations/" + organizationId + "/crm/contacts" + (editingContactId ? "/" + editingContactId : ""), token, { method: editingContactId ? "PUT" : "POST", body: JSON.stringify({ fullName, email, phone, company, notes: contactNotes }) });
+      setFullName(""); setEmail(""); setPhone(""); setCompany(""); setContactNotes(""); setEditingContactId(""); await reload(); setNotice(editingContactId ? "اطلاعات مخاطب ویرایش شد." : "مخاطب ثبت شد.");
     });
   }
 
   function editContact(contact: Contact) {
     setEditingContactId(contact.id); setFullName(contact.fullName); setEmail(contact.email ?? "");
-    setPhone(contact.phone ?? ""); setCompany(contact.company ?? "");
+    setPhone(contact.phone ?? ""); setCompany(contact.company ?? ""); setContactNotes(contact.notes ?? "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -120,7 +121,7 @@ export default function CrmPage() {
     {error && <div className="crm-error" role="alert">{error}</div>}{notice && <div className="crm-notice" role="status">{notice}</div>}
     <section className="crm-stats"><article><span>مخاطبان</span><strong>{contacts.length}</strong></article><article><span>فرصت‌های فروش</span><strong>{leads.length}</strong></article><article><span>فعالیت‌های ثبت‌شده</span><strong>{activities.length}</strong></article><article><span>ارزش فرصت‌ها</span><strong>{leads.reduce((sum, lead) => sum + (lead.estimatedValue ?? 0), 0).toLocaleString("fa-IR")}</strong></article></section>
     <div className="crm-grid">
-      <section className="crm-panel"><h2>ثبت مخاطب جدید</h2><form className="crm-form" onSubmit={createContact}><label>نام و نام خانوادگی<input required maxLength={180} value={fullName} onChange={e => setFullName(e.target.value)} /></label><label>ایمیل<input type="email" dir="ltr" value={email} onChange={e => setEmail(e.target.value)} /></label><label>شماره تماس<input dir="ltr" maxLength={40} value={phone} onChange={e => setPhone(e.target.value)} /></label><label>شرکت / مجموعه<input maxLength={180} value={company} onChange={e => setCompany(e.target.value)} /></label><div className="crm-form-actions"><button disabled={busy || !organizationId}>{editingContactId ? "ذخیره ویرایش" : "ثبت مخاطب"}</button>{editingContactId && <button type="button" className="crm-cancel" onClick={() => { setEditingContactId(""); setFullName(""); setEmail(""); setPhone(""); setCompany(""); }}>انصراف</button>}</div></form></section>
+      <section className="crm-panel"><h2>ثبت مخاطب جدید</h2><form className="crm-form" onSubmit={createContact}><label>نام و نام خانوادگی<input required maxLength={180} value={fullName} onChange={e => setFullName(e.target.value)} /></label><label>ایمیل<input type="email" dir="ltr" value={email} onChange={e => setEmail(e.target.value)} /></label><label>شماره تماس<input dir="ltr" maxLength={40} value={phone} onChange={e => setPhone(e.target.value)} /></label><label>شرکت / مجموعه<input maxLength={180} value={company} onChange={e => setCompany(e.target.value)} /></label><label className="crm-notes-field">یادداشت<textarea maxLength={4000} rows={2} value={contactNotes} onChange={e => setContactNotes(e.target.value)} /></label><div className="crm-form-actions"><button disabled={busy || !organizationId}>{editingContactId ? "ذخیره ویرایش" : "ثبت مخاطب"}</button>{editingContactId && <button type="button" className="crm-cancel" onClick={() => { setEditingContactId(""); setFullName(""); setEmail(""); setPhone(""); setCompany(""); setContactNotes(""); }}>انصراف</button>}</div></form></section>
       <section className="crm-panel"><h2>ایجاد فرصت فروش</h2><form className="crm-form" onSubmit={createLead}><label>عنوان فرصت<input required maxLength={240} value={leadTitle} onChange={e => setLeadTitle(e.target.value)} /></label><label>مخاطب مرتبط<select value={leadContactId} onChange={e => setLeadContactId(e.target.value)}><option value="">بدون مخاطب</option>{contacts.map(c => <option key={c.id} value={c.id}>{c.fullName}</option>)}</select></label><label>ارزش تخمینی<input type="number" min="0" step="0.01" value={leadValue} onChange={e => setLeadValue(e.target.value)} /></label><label>منبع آشنایی<input maxLength={120} value={leadSource} onChange={e => setLeadSource(e.target.value)} placeholder="وب‌سایت، معرفی، تماس..." /></label><button disabled={busy || !organizationId}>ثبت فرصت فروش</button></form></section>
     </div>
     <section className="crm-panel crm-table-panel"><div className="crm-panel-heading"><h2>مخاطبان سازمان</h2><span>{contacts.length} مخاطب</span></div>{contacts.length === 0 ? <p className="crm-empty">هنوز مخاطبی ثبت نشده است.</p> : <div className="crm-table-wrap"><table><thead><tr><th>نام</th><th>شرکت</th><th>ایمیل</th><th>تلفن</th><th>عملیات</th></tr></thead><tbody>{contacts.map(c => <tr key={c.id}><td>{c.fullName}</td><td>{c.company || "—"}</td><td dir="ltr">{c.email || "—"}</td><td dir="ltr">{c.phone || "—"}</td><td><div className="crm-row-actions"><button type="button" onClick={() => editContact(c)}>ویرایش</button><button type="button" onClick={() => void deleteContact(c)} disabled={busy}>حذف</button></div></td></tr>)}</tbody></table></div>}</section>
