@@ -29,13 +29,15 @@ export default function ChannelsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [metaReady, setMetaReady] = useState(false);
   async function reload(org = organizationId, access = token) {
     if (!org || !access) return;
-    const [channels, brandList] = await Promise.all([
+    const [channels, brandList, metaConfig] = await Promise.all([
       request<Channel[]>("/api/organizations/" + org + "/channels", access),
-      request<Brand[]>("/api/organizations/" + org + "/brands", access)
+      request<Brand[]>("/api/organizations/" + org + "/brands", access),
+      request<{ instagramBusinessLoginReady: boolean }>("/api/organizations/" + org + "/channels/meta/configuration", access)
     ]);
-    setItems(channels); setBrands(brandList);
+    setItems(channels); setBrands(brandList); setMetaReady(metaConfig.instagramBusinessLoginReady);
   }
   useEffect(() => {
     const saved = localStorage.getItem("majazi_access_token") ?? "";
@@ -63,6 +65,12 @@ export default function ChannelsPage() {
       await reload(); setNotice("اطلاعات کانال به‌صورت امن ثبت شد. وضعیت اتصال باید پس از OAuth یا اعتبارسنجی رسمی تأیید شود.");
     });
   }
+  async function connectInstagram() {
+    await run(async () => {
+      const result = await request<{ authorizationUrl: string }>("/api/organizations/" + organizationId + "/channels/meta/connect", token, { method: "GET" });
+      window.location.assign(result.authorizationUrl);
+    });
+  }
   async function verify(item: Channel) {
     await run(async () => {
       const result = await request<{ username?: string; status: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/verify", token, { method: "POST" });
@@ -76,9 +84,9 @@ export default function ChannelsPage() {
   if (!token) return <main className="channels-shell"><section className="channels-panel"><h1>ورود به مدیریت کانال‌ها</h1><p>ابتدا از داشبورد اصلی وارد حساب کاربری شوید.</p><Link href="/">بازگشت به داشبورد</Link></section></main>;
   return <main className="channels-shell" dir="rtl">
     <header className="channels-header"><div><span>MAJAZI / CHANNELS</span><h1>اتصال شبکه‌های اجتماعی</h1><p>مدیریت کانال‌های هر سازمان و برند</p></div><Link href="/">بازگشت به داشبورد</Link></header>
-    <section className="channels-toolbar"><label>فضای سازمانی<select value={organizationId} onChange={e => setOrganizationId(e.target.value)}>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.role}</option>)}</select></label><button type="button" disabled={busy || !organizationId} onClick={() => void run(async () => { await reload(); setNotice("فهرست کانال‌ها به‌روزرسانی شد."); })}>به‌روزرسانی</button></section>
+    <section className="channels-toolbar"><label>فضای سازمانی<select value={organizationId} onChange={e => setOrganizationId(e.target.value)}>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.role}</option>)}</select></label><div className="channels-actions"><button type="button" disabled={busy || !organizationId || !metaReady} onClick={() => void connectInstagram()}>اتصال رسمی اینستاگرام با Meta</button><button type="button" disabled={busy || !organizationId} onClick={() => void run(async () => { await reload(); setNotice("فهرست کانال‌ها به‌روزرسانی شد."); })}>به‌روزرسانی</button></div></section>
     {error && <div className="channels-error" role="alert">{error}</div>}{notice && <div className="channels-notice" role="status">{notice}</div>}
-    <section className="channels-warning"><strong>نکته امنیتی و وضعیت اتصال</strong><p>توکن ارسالی در پایگاه داده رمزنگاری می‌شود و هیچ‌گاه در پاسخ API نمایش داده نمی‌شود. ثبت توکن به‌تنهایی به معنی اتصال تأییدشده نیست. اتصال عملیاتی اینستاگرام و فیسبوک به OAuth و مجوزهای برنامه Meta و تلگرام به اعتبارسنجی Bot API نیاز دارد.</p></section>
+    <section className="channels-warning"><strong>نکته امنیتی و وضعیت اتصال</strong><p>توکن‌ها در پایگاه داده رمزنگاری می‌شوند و در پاسخ API نمایش داده نمی‌شوند. اتصال رسمی اینستاگرام از Business Login انجام می‌شود؛ دکمه اتصال زمانی فعال است که App ID، App Secret و Redirect URI امن روی سرور تنظیم شده باشند. فیسبوک و وب‌هوک‌ها هنوز فعال نشده‌اند.</p></section>
     <section className="channels-panel"><h2>ثبت کانال</h2><form className="channels-form" onSubmit={submit}>
       <label>پلتفرم<select value={provider} onChange={e => setProvider(e.target.value)}>{providers.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label>
       <label>نام نمایشی<input required maxLength={180} value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="مثلاً صفحه رسمی برند"/></label>
