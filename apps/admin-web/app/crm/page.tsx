@@ -6,7 +6,7 @@ import "./crm.css";
 
 type Organization = { id: string; name: string; role: string };
 type Contact = { id: string; fullName: string; email?: string | null; phone?: string | null; company?: string | null; notes?: string | null; brandId?: string | null; createdAt: string };
-type Lead = { id: string; title: string; stage: string; estimatedValue?: number | null; source?: string | null; contactId?: string | null; contactName?: string | null; createdAt: string; updatedAt: string };
+type Lead = { id: string; title: string; stage: string; estimatedValue?: number | null; source?: string | null; notes?: string | null; contactId?: string | null; contactName?: string | null; createdAt: string; updatedAt: string };
 type Activity = { id: string; activityType: string; summary: string; occurredAt: string; contactId?: string | null; leadId?: string | null };
 const stages = [{ id: "New", label: "جدید" }, { id: "Qualified", label: "ارزیابی‌شده" }, { id: "Proposal", label: "پیشنهاد" }, { id: "Negotiation", label: "مذاکره" }, { id: "Won", label: "موفق" }, { id: "Lost", label: "از دست‌رفته" }];
 const activityTypes = [{ id: "Note", label: "یادداشت" }, { id: "Call", label: "تماس" }, { id: "Email", label: "ایمیل" }, { id: "Meeting", label: "جلسه" }, { id: "Task", label: "وظیفه" }];
@@ -102,7 +102,7 @@ export default function CrmPage() {
 
   function editLead(lead: Lead) {
     setEditingLeadId(lead.id); setLeadTitle(lead.title); setLeadContactId(lead.contactId ?? "");
-    setLeadValue(lead.estimatedValue == null ? "" : String(lead.estimatedValue)); setLeadSource(lead.source ?? "");
+    setLeadValue(lead.estimatedValue == null ? "" : String(lead.estimatedValue)); setLeadSource(lead.source ?? ""); setLeadNotes(lead.notes ?? "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
