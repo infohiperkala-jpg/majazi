@@ -12,6 +12,7 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<CrmContact> CrmContacts => Set<CrmContact>();
     public DbSet<CrmLead> CrmLeads => Set<CrmLead>();
     public DbSet<CrmActivity> CrmActivities => Set<CrmActivity>();
+    public DbSet<MarketingCampaign> MarketingCampaigns => Set<MarketingCampaign>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -70,6 +71,19 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(x => x.Contact).WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<MarketingCampaign>(e =>
+        {
+            e.ToTable("marketing_campaigns"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Objective).HasMaxLength(1000);
+            e.Property(x => x.Channel).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Budget).HasPrecision(18, 2);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.HasIndex(x => new { x.OrganizationId, x.Status, x.StartsAt });
+            e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
         });
         modelBuilder.Entity<CrmActivity>(e =>
         {
