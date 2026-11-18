@@ -1,5 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text;
 using System.Threading.RateLimiting;
 using Majazi.Api.Data;
@@ -26,6 +28,7 @@ builder.Services.AddDbContext<MajaziDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddDataProtection()
     .SetApplicationName("MAJAZI")
     .PersistKeysToFileSystem(new DirectoryInfo(builder.Configuration["DataProtection:KeysPath"] ?? "/var/lib/majazi/keys"));
+builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12));
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -588,6 +591,62 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
             HasCredential = item.EncryptedAccessToken != null, item.CreatedAt });
 });
+channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection,
+    IHttpClientFactory httpClientFactory, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
+        x => x.Id == connectionId && x.OrganizationId == organizationId && x.Provider == "Telegram", ct);
+    if (item is null) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(item.EncryptedAccessToken))
+        return Results.BadRequest(new { error = "برای این کانال توکن ربات ثبت نشده است." });
+
+    string botToken;
+    try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+    catch (CryptographicException)
+    {
+        item.Status = "VerificationFailed";
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Results.Conflict(new { error = "توکن ذخیره‌شده قابل رمزگشایی نیست؛ اعتبارنامه را دوباره ثبت کنید." });
+    }
+
+    try
+    {
+        using var response = await httpClientFactory.CreateClient("TelegramBotApi")
+            .GetAsync($"https://api.telegram.org/bot{botToken}/getMe", ct);
+        using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var root = payload.RootElement;
+        if (response.IsSuccessStatusCode && root.TryGetProperty("ok", out var ok) && ok.GetBoolean() &&
+            root.TryGetProperty("result", out var result) && result.TryGetProperty("id", out var botId))
+        {
+            item.ExternalAccountId = botId.ToString();
+            item.Status = "Connected";
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+            var username = result.TryGetProperty("username", out var userName) ? userName.GetString() : null;
+            return Results.Ok(new { item.Id, item.Provider, item.DisplayName, item.ExternalAccountId, Username = username, item.Status, VerifiedAt = item.UpdatedAt });
+        }
+        item.Status = "VerificationFailed";
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Results.BadRequest(new { error = "تلگرام اعتبارنامه را تأیید نکرد. توکن ربات را بررسی کنید." });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    {
+        return Results.Problem("ارتباط با Telegram Bot API در زمان مقرر پاسخ نداد.", statusCode: 504);
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem("ارتباط با Telegram Bot API برقرار نشد.", statusCode: 502);
+    }
+});
+
 channelsApi.MapDelete("/{connectionId:guid}", async (Guid organizationId, Guid connectionId,
     ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
