@@ -127,8 +127,18 @@ app.MapPost("/api/auth/register", async (RegisterRequest request, MajaziDbContex
 }).RequireRateLimiting("auth");
 
 app.MapPost("/api/auth/login", async (LoginRequest request, MajaziDbContext db,
-    IPasswordHasher<AppUser> hasher, IConfiguration config, CancellationToken ct) =>
+    IPasswordHasher<AppUser> hasher, IConfiguration config, IMemoryCache cache, CancellationToken ct) =>
 {
+    var captchaId = request.CaptchaId?.Trim();
+    var captchaAnswer = request.CaptchaAnswer?.Trim();
+    if (string.IsNullOrWhiteSpace(captchaId) || !cache.TryGetValue("register-captcha:" + captchaId, out string? expectedCaptcha))
+        return Results.BadRequest(new { error = "کد امنیتی منقضی شده است؛ تصویر جدید دریافت کنید." });
+    cache.Remove("register-captcha:" + captchaId);
+    var suppliedBytes = Encoding.UTF8.GetBytes(captchaAnswer ?? "");
+    var expectedBytes = Encoding.UTF8.GetBytes(expectedCaptcha ?? "");
+    if (suppliedBytes.Length != expectedBytes.Length || !CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes))
+        return Results.BadRequest(new { error = "کد امنیتی صحیح نیست؛ دوباره تلاش کنید." });
+
     var email = request.Email?.Trim().ToLowerInvariant();
     if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(request.Password))
         return Results.Unauthorized();
@@ -846,7 +856,7 @@ static object IssueToken(AppUser user, IConfiguration config)
 static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? CaptchaId, string? CaptchaAnswer);
-public sealed record LoginRequest(string? Email, string? Password);
+public sealed record LoginRequest(string? Email, string? Password, string? CaptchaId, string? CaptchaAnswer);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
 public sealed record CreateBrandRequest(string? Name, string? Slug);
 public sealed record AddMemberRequest(string? Email, string? Role);
