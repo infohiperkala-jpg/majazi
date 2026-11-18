@@ -100,8 +100,35 @@ export default function Home() {
   }, [authMode]);
 
   useEffect(() => {
-    setAuthenticated(Boolean(localStorage.getItem("majazi_access_token")));
-    setAuthReady(true);
+    let active = true;
+    const token = localStorage.getItem("majazi_access_token");
+    if (!token) {
+      setAuthReady(true);
+      return () => { active = false; };
+    }
+
+    // Validate the saved token with the API before opening protected pages.
+    fetch("/backend-api/api/auth/me", {
+      headers: { Authorization: "Bearer " + token },
+      cache: "no-store",
+    }).then((response) => {
+      if (!active) return;
+      if (response.ok) {
+        setAuthenticated(true);
+      } else if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem("majazi_access_token");
+        setAuthenticated(false);
+      } else {
+        // Keep the session during temporary API/server errors.
+        setAuthenticated(true);
+      }
+    }).catch(() => {
+      if (active) setAuthenticated(true);
+    }).finally(() => {
+      if (active) setAuthReady(true);
+    });
+
+    return () => { active = false; };
   }, []);
   useEffect(() => { if (authenticated) void loadOrganizations(); }, [authenticated, loadOrganizations]);
 
