@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import "./crm.css";
 
 type Organization = { id: string; name: string; role: string };
 type Contact = { id: string; fullName: string; email?: string | null; phone?: string | null; company?: string | null; notes?: string | null; brandId?: string | null; createdAt: string };
