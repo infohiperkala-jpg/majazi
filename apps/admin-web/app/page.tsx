@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 type Organization = { id: string; name: string; slug: string; createdAt: string };
 type Brand = { id: string; organizationId: string; name: string; slug: string; createdAt: string };
+type Member = { userId: string; email: string; role: "Owner" | "Admin" | "Member"; createdAt: string };
 
 const modules = [
   ["مرکز هوش مصنوعی", "مدیریت مدل‌ها و عوامل هوشمند", "AI"],
@@ -34,6 +35,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export default function Home() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [memberEmail, setMemberEmail] = useState("");
+  const [memberRole, setMemberRole] = useState<"Admin" | "Member">("Member");
   const [selectedId, setSelectedId] = useState("");
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
@@ -74,11 +78,13 @@ export default function Home() {
   useEffect(() => { if (authenticated) void loadOrganizations(); }, [authenticated, loadOrganizations]);
 
   useEffect(() => {
-    if (!selectedId) { setBrands([]); return; }
+    if (!selectedId) { setBrands([]); setMembers([]); return; }
     let active = true;
-    api<Brand[]>(`/api/organizations/${selectedId}/brands`)
-      .then((data) => { if (active) setBrands(data); })
-      .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : "دریافت برندها ناموفق بود."); });
+    Promise.all([
+      api<Brand[]>(`/api/organizations/${selectedId}/brands`),
+      api<Member[]>(`/api/organizations/${selectedId}/members`),
+    ]).then(([brandData, memberData]) => { if (active) { setBrands(brandData); setMembers(memberData); } })
+      .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : "دریافت اطلاعات سازمان ناموفق بود."); });
     return () => { active = false; };
   }, [selectedId]);
 
@@ -110,6 +116,30 @@ export default function Home() {
       setOrganizations((items) => [...items, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedId(created.id); setOrgName(""); setOrgSlug(""); setNotice("سازمان با موفقیت ثبت شد.");
     } catch (e) { setError(e instanceof Error ? e.message : "ثبت سازمان ناموفق بود."); }
+    finally { setSaving(false); }
+  }
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!selectedId) return;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const created = await api<Member>(`/api/organizations/${selectedId}/members`, {
+        method: "POST", body: JSON.stringify({ email: memberEmail, role: memberRole }),
+      });
+      setMembers(items => [...items, created].sort((a, b) => a.email.localeCompare(b.email)));
+      setMemberEmail(""); setNotice("عضو جدید به سازمان اضافه شد.");
+    } catch (e) { setError(e instanceof Error ? e.message : "افزودن عضو ناموفق بود."); }
+    finally { setSaving(false); }
+  }
+
+  async function removeMember(member: Member) {
+    if (!selectedId || !window.confirm(`عضویت ${member.email} از این سازمان لغو شود؟`)) return;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      await api<void>(`/api/organizations/${selectedId}/members/${member.userId}`, { method: "DELETE" });
+      setMembers(items => items.filter(x => x.userId !== member.userId));
+      setNotice("عضویت کاربر لغو شد.");
+    } catch (e) { setError(e instanceof Error ? e.message : "حذف عضو ناموفق بود."); }
     finally { setSaving(false); }
   }
 
@@ -213,6 +243,13 @@ export default function Home() {
             </form>
             <h3 className="subheading">برندهای ثبت‌شده</h3>
             {brands.length === 0 ? <p className="muted">برای این سازمان برندی ثبت نشده است.</p> : <div className="org-list">{brands.map((brand) => <div className="org-row" key={brand.id}><div className="org-item"><span><strong>{brand.name}</strong><small dir="ltr">{brand.slug}</small></span><b>فعال</b></div><button type="button" className="delete-button" disabled={saving} onClick={() => void deleteBrand(brand)} aria-label={`حذف برند ${brand.name}`}>حذف</button></div>)}</div>}
+            <h3 className="subheading">اعضای سازمان</h3>
+            <form className="member-form" onSubmit={addMember}>
+              <label>ایمیل کاربر<input type="email" value={memberEmail} onChange={e => setMemberEmail(e.target.value)} required dir="ltr" placeholder="user@example.com" /></label>
+              <label>نقش<select value={memberRole} onChange={e => setMemberRole(e.target.value as "Admin" | "Member")}><option value="Member">عضو</option><option value="Admin">مدیر</option></select></label>
+              <button type="submit" disabled={saving}>افزودن عضو</button>
+            </form>
+            <div className="org-list member-list">{members.map(member => <div className="org-row" key={member.userId}><div className="org-item"><span><strong dir="ltr">{member.email}</strong><small>{member.role === "Owner" ? "مالک" : member.role === "Admin" ? "مدیر" : "عضو"}</small></span><b>{member.role}</b></div>{member.role !== "Owner" && <button type="button" className="delete-button" disabled={saving} onClick={() => void removeMember(member)}>لغو عضویت</button>}</div>)}</div>
           </> : <p className="muted">ابتدا یک سازمان ایجاد یا انتخاب کنید.</p>}
         </section>
       </div>
