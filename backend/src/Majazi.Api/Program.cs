@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+var leadStages = new HashSet<string>(["New", "Qualified", "Proposal", "Negotiation", "Won", "Lost"]);
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
@@ -378,7 +379,7 @@ crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, Cla
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var title = request.Title?.Trim();
     var stage = request.Stage?.Trim() ?? "New";
-    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || !LeadStages.Contains(stage) ||
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || !leadStages.Contains(stage) ||
         request.EstimatedValue < 0 || (request.Source?.Length ?? 0) > 120 || (request.Notes?.Length ?? 0) > 4000)
         return Results.BadRequest(new { error = "عنوان، مرحله یا مبلغ فرصت فروش معتبر نیست." });
     if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
@@ -468,8 +469,6 @@ public sealed record CreateBrandRequest(string? Name, string? Slug);
 public sealed record AddMemberRequest(string? Email, string? Role);
 
 static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-static readonly HashSet<string> LeadStages = ["New", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 
 public sealed record CrmContactRequest(Guid? BrandId, string? FullName, string? Email, string? Phone, string? Company, string? Notes);
 public sealed record CrmLeadRequest(Guid? BrandId, Guid? ContactId, string? Title, string? Stage, decimal? EstimatedValue, string? Source, string? Notes);
