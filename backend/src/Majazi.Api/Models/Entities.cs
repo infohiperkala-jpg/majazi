@@ -113,3 +113,19 @@ public sealed class MarketingCampaign
     public Organization? Organization { get; set; }
     public Brand? Brand { get; set; }
 }
+
+public sealed class SocialChannelConnection
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BrandId { get; set; }
+    public required string Provider { get; set; }
+    public required string DisplayName { get; set; }
+    public string? ExternalAccountId { get; set; }
+    public string? EncryptedAccessToken { get; set; }
+    public string Status { get; set; } = "PendingAuthorization";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Organization? Organization { get; set; }
+    public Brand? Brand { get; set; }
+}
