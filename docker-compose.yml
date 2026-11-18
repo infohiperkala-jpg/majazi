@@ -17,7 +17,7 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Default: ${ConnectionStrings__Default:-Host=postgres;Port=5432;Database=majazi;Username=majazi;Password=change-this-local-password}
-      Jwt__SigningKey: ${JWT_SIGNING_KEY:-local-development-key-change-this-before-deploy-123456789}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set a unique JWT_SIGNING_KEY in .env}
       Jwt__Issuer: ${JWT_ISSUER:-majazi-api}
       Jwt__Audience: ${JWT_AUDIENCE:-majazi-web}
     ports: ["5080:8080"]
