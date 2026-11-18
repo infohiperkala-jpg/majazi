@@ -87,9 +87,9 @@ export default function ChannelsPage() {
     <section className="channels-toolbar"><label>فضای سازمانی<select value={organizationId} onChange={e => setOrganizationId(e.target.value)}>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.role}</option>)}</select></label><div className="channels-actions"><button type="button" disabled={busy || !organizationId || !metaReady} onClick={() => void connectInstagram()}>اتصال رسمی اینستاگرام با Meta</button><button type="button" disabled={busy || !organizationId} onClick={() => void run(async () => { await reload(); setNotice("فهرست کانال‌ها به‌روزرسانی شد."); })}>به‌روزرسانی</button></div></section>
     {error && <div className="channels-error" role="alert">{error}</div>}{notice && <div className="channels-notice" role="status">{notice}</div>}
     <section className="channels-metrics">
-      <article><span>تمام کانال‌ها</span><strong>{items.length.toLocaleString("fa-IR")}</strong><small>ثبت‌شده در این سازمان</small></article>
-      <article><span>اتصال‌های تأییدشده</span><strong>{items.filter(x => x.status === "Connected").length.toLocaleString("fa-IR")}</strong><small>تأییدشده توسط سرویس مقصد</small></article>
-      <article><span>نیازمند اقدام</span><strong>{items.filter(x => x.status !== "Connected").length.toLocaleString("fa-IR")}</strong><small>در انتظار اعتبارسنجی یا مجوز</small></article>
+      <article><span>تمام کانال‌ها</span><strong>{items.length.toLocaleString("en-US")}</strong><small>ثبت‌شده در این سازمان</small></article>
+      <article><span>اتصال‌های تأییدشده</span><strong>{items.filter(x => x.status === "Connected").length.toLocaleString("en-US")}</strong><small>تأییدشده توسط سرویس مقصد</small></article>
+      <article><span>نیازمند اقدام</span><strong>{items.filter(x => x.status !== "Connected").length.toLocaleString("en-US")}</strong><small>در انتظار اعتبارسنجی یا مجوز</small></article>
       <article><span>اتصال رسمی اینستاگرام</span><strong className={metaReady ? "metric-ready" : "metric-pending"}>{metaReady ? "آماده" : "نیازمند تنظیمات"}</strong><small>وضعیت پیکربندی OAuth سرور</small></article>
     </section>
     <section className="channels-warning"><strong>نکته امنیتی و وضعیت اتصال</strong><p>توکن‌ها در پایگاه داده رمزنگاری می‌شوند و در پاسخ API نمایش داده نمی‌شوند. اتصال رسمی اینستاگرام از Business Login انجام می‌شود؛ دکمه اتصال زمانی فعال است که App ID، App Secret و Redirect URI امن روی سرور تنظیم شده باشند. فیسبوک و وب‌هوک‌ها هنوز فعال نشده‌اند.</p></section>
@@ -101,7 +101,7 @@ export default function ChannelsPage() {
       <label className="channels-wide">توکن دسترسی (اختیاری)<input type="password" autoComplete="new-password" maxLength={8000} value={accessToken} onChange={e => setAccessToken(e.target.value)} placeholder="فقط در صورت داشتن اعتبارنامه رسمی وارد کنید"/></label>
       <div className="channels-wide channels-actions"><button disabled={busy || !organizationId}>ثبت امن کانال</button></div>
     </form></section>
-    <section className="channels-panel"><div className="channels-heading"><h2>کانال‌های ثبت‌شده</h2><span>{items.length.toLocaleString("fa-IR")} مورد</span></div>
+    <section className="channels-panel"><div className="channels-heading"><h2>کانال‌های ثبت‌شده</h2><span>{items.length.toLocaleString("en-US")} مورد</span></div>
       {items.length === 0 ? <p className="channels-empty">هنوز کانالی برای این سازمان ثبت نشده است.</p> : <div className="channels-list">{items.map(item => <article className="channel-card" key={item.id}>
         <div className="channel-mark">{item.provider === "Telegram" ? "TG" : item.provider === "Facebook" ? "FB" : "IG"}</div>
         <div className="channel-info"><strong>{item.displayName}</strong><span>{providers.find(x => x.id === item.provider)?.label ?? item.provider}{item.externalAccountId ? " · " + item.externalAccountId : ""}</span><small>{statusLabel[item.status] ?? item.status}{item.hasCredential ? " · دارای اعتبارنامه رمز‌شده" : " · بدون اعتبارنامه"}</small></div>
