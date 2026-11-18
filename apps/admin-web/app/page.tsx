@@ -7,18 +7,26 @@ type Brand = { id: string; organizationId: string; name: string; slug: string; c
 type Member = { userId: string; email: string; role: "Owner" | "Admin" | "Member"; createdAt: string };
 
 const modules = [
-  ["مرکز هوش مصنوعی", "مدیریت مدل‌ها و عوامل هوشمند", "AI"],
-  ["استودیوی محتوا", "تولید و مدیریت محتوای برندها", "CT"],
-  ["تقویم انتشار", "برنامه‌ریزی و تأیید محتوا", "PL"],
-  ["شبکه‌های اجتماعی", "مدیریت اتصال کانال‌ها", "CH"],
-  ["مدیریت کمپین‌ها", "برنامه‌ریزی و سنجش کمپین", "CM"],
-  ["مدیریت مشتریان", "پروفایل و تاریخچه ارتباط", "CR"],
-  ["فرصت‌های فروش", "پیگیری سرنخ تا تبدیل", "SA"],
-  ["مرکز مکالمات", "پیام‌ها و ارجاع به اپراتور", "IN"],
-  ["مرکز دانش", "اطلاعات تأییدشده هر برند", "KB"],
-  ["اتوماسیون", "گردش‌کارهای سازمانی", "WF"],
-  ["گزارش‌ها", "شاخص‌ها و تحلیل عملکرد", "BI"],
-  ["تنظیمات و دسترسی", "کاربران، نقش‌ها و امنیت", "SE"],
+  ["داشبورد مدیریت کل", "نمای کلی شاخص‌ها و فعالیت سامانه", "DB"],
+  ["مدیریت سازمان‌ها و برندها", "فضاهای کاری، اعضا و هویت برند", "OR"],
+  ["مرکز هوش مصنوعی", "مدل‌ها، کلیدها و عوامل هوشمند", "AI"],
+  ["استودیوی تولید محتوا", "تولید متن، تصویر و محتوای برند", "CT"],
+  ["تقویم محتوایی", "زمان‌بندی، بازبینی و تأیید انتشار", "PL"],
+  ["مدیریت شبکه‌های اجتماعی", "اتصال و مدیریت کانال‌ها", "CH"],
+  ["مدیریت کمپین‌های تبلیغاتی", "طراحی، اجرا و سنجش کمپین", "CM"],
+  ["مرکز پیام‌ها و مکالمات", "صندوق ورودی یکپارچه و ارجاع", "IN"],
+  ["مرکز تماس هوشمند", "تماس‌ها، صف و دستیار مکالمه", "CC"],
+  ["مدیریت اپراتورهای هوشمند", "تعریف دستیارها و سطح دسترسی", "OP"],
+  ["مدیریت مشتریان CRM", "پروفایل، تعاملات و بخش‌بندی", "CR"],
+  ["مدیریت سرنخ‌های فروش", "قیف فروش و پیگیری فرصت‌ها", "LD"],
+  ["مدیریت فرصت‌های فروش", "پیشنهادها، مذاکرات و تبدیل", "SA"],
+  ["مدیریت سفارش‌ها و پرداخت‌ها", "سفارش، فاکتور و تراکنش", "OR"],
+  ["اتوماسیون و گردش‌کار", "قواعد، محرک‌ها و عملیات خودکار", "WF"],
+  ["مرکز دانش و اطلاعات کسب‌وکار", "دانش‌نامه و منابع تأییدشده", "KB"],
+  ["مدیریت کاربران و تیم", "اعضا، نقش‌ها و مجوزها", "TM"],
+  ["گزارش‌ها و هوش تجاری", "گزارش عملکرد و تحلیل شاخص‌ها", "BI"],
+  ["مدیریت هزینه‌ها و عملکرد", "بودجه، هزینه و بازدهی", "FN"],
+  ["امنیت، حسابرسی و تنظیمات", "امنیت، رویدادها و پیکربندی", "SE"],
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -223,21 +231,47 @@ export default function Home() {
 
   return <main className="shell">
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">م</span><div><strong>MAJAZI</strong><small>هوشمندتر بازاریابی کن</small></div></div>
-      <div className="side-label">فضای کاری</div>
-      <a className="nav active" href="/">نمای کلی</a><a className="nav" href="#organizations">سازمان‌ها و برندها</a><a className="nav" href="/crm">مرکز CRM</a><a className="nav" href="/campaigns">مدیریت کمپین‌ها</a><a className="nav" href="/channels">اتصال شبکه‌ها</a><a className="nav" href="#modules">همه ماژول‌ها</a><a className="nav" href="#status">وضعیت سامانه</a>
-      <div className="sidebar-bottom"><i/> هسته سامانه در حال توسعه</div>
+      <div className="brand"><span className="brand-mark">م</span><div><strong>MAJAZI</strong><small>مرکز هوشمند بازاریابی و فروش</small></div></div>
+      <div className="side-label">مدیریت فضای کاری</div>
+      <a className="nav active" href="#status"><span>۱.</span> داشبورد مدیریت کل</a>
+      <a className="nav" href="#organizations"><span>۲.</span> مدیریت سازمان‌ها و برندها</a>
+      <a className="nav" href="#modules"><span>۳.</span> مرکز هوش مصنوعی</a>
+      <a className="nav" href="#modules"><span>۴.</span> استودیوی تولید محتوا</a>
+      <a className="nav" href="#modules"><span>۵.</span> تقویم محتوایی</a>
+      <a className="nav" href="#channels"><span>۶.</span> مدیریت شبکه‌های اجتماعی</a>
+      <a className="nav" href="#modules"><span>۷.</span> مدیریت کمپین‌های تبلیغاتی</a>
+      <a className="nav" href="#modules"><span>۸.</span> مرکز پیام‌ها و مکالمات</a>
+      <a className="nav" href="#modules"><span>۹.</span> مرکز تماس هوشمند</a>
+      <a className="nav" href="#modules"><span>۱۰.</span> مدیریت اپراتورهای هوشمند</a>
+      <a className="nav" href="#modules"><span>۱۱.</span> مدیریت مشتریان</a>
+      <a className="nav" href="#modules"><span>۱۲.</span> مدیریت سرنخ‌های فروش</a>
+      <a className="nav" href="#modules"><span>۱۳.</span> مدیریت فرصت‌های فروش</a>
+      <a className="nav" href="#modules"><span>۱۴.</span> مدیریت سفارش‌ها و پرداخت‌ها</a>
+      <a className="nav" href="#modules"><span>۱۵.</span> اتوماسیون و گردش‌کار</a>
+      <a className="nav" href="#modules"><span>۱۶.</span> مرکز دانش و اطلاعات کسب‌وکار</a>
+      <a className="nav" href="#modules"><span>۱۷.</span> مدیریت کاربران و تیم</a>
+      <a className="nav" href="#modules"><span>۱۸.</span> گزارش‌ها و هوش تجاری</a>
+      <a className="nav" href="#modules"><span>۱۹.</span> مدیریت هزینه‌ها و عملکرد</a>
+      <a className="nav" href="#modules"><span>۲۰.</span> امنیت، حسابرسی و تنظیمات</a>
+      <div className="sidebar-bottom"><i/> اتصال زنده به هسته سامانه</div>
     </aside>
     <section className="content">
       <header className="topbar"><div><span className="eyebrow">مرکز فرماندهی</span><h1>داشبورد مدیریت</h1></div><div className="profile"><span className="avatar">م</span>مدیر سامانه<button type="button" className="logout-button" onClick={logout}>خروج</button></div></header>
-      <section className="welcome"><div><span className="eyebrow light">MARKETING &amp; SALES INTELLIGENCE</span><h2>بازاریابی و فروش، یکپارچه و هوشمند</h2><p>از شناخت مشتری تا تولید محتوا و مدیریت ارتباطات، همه‌چیز در یک فضای کاری.</p></div><b>م</b></section>
-      <div className="section-heading" id="status"><div><h2>وضعیت هسته سامانه</h2><p>آمار سازمان‌ها و برندها مستقیماً از پایگاه داده خوانده می‌شود.</p></div><span className="pill">نسخه توسعه ۰.۲</span></div>
+      <div className="section-heading" id="status"><div><h2>داشبورد مدیریت کل</h2><p>نمای کلی وضعیت سازمان، ارتباطات و عملکرد بازاریابی</p></div><span className="pill">نسخه توسعه</span></div>
       <div className="stats">
-        <article className="stat"><span>سازمان‌ها</span><strong>{loading ? "…" : organizations.length}</strong><small>ثبت‌شده در سامانه</small></article>
-        <article className="stat"><span>برندهای سازمان منتخب</span><strong>{brands.length}</strong><small>برندهای سازمان انتخاب‌شده</small></article>
-        <article className="stat"><span>کانال‌های ثبت‌شده</span><strong>—</strong><small>مشاهده در بخش اتصال شبکه‌ها</small></article>
-        <article className="stat"><span>عامل‌های فعال AI</span><strong>۰</strong><small>پس از پیکربندی فعال می‌شوند</small></article>
+        <article className="stat"><span>سازمان‌های فعال</span><strong>{loading ? "…" : organizations.length}</strong><small>داده مستقیم از پایگاه داده</small></article>
+        <article className="stat"><span>کانال‌های متصل</span><strong>۰</strong><small>هنوز اتصالی پیکربندی نشده</small></article>
+        <article className="stat"><span>پیام‌های ورودی</span><strong>نامشخص</strong><small>پس از راه‌اندازی صندوق ورودی</small></article>
+        <article className="stat"><span>محتوای منتشرشده</span><strong>نامشخص</strong><small>پس از فعال‌سازی استودیوی محتوا</small></article>
+        <article className="stat"><span>محتوای در انتظار تأیید</span><strong>نامشخص</strong><small>نیازمند گردش‌کار محتوا</small></article>
+        <article className="stat"><span>سرنخ‌های فروش</span><strong>نامشخص</strong><small>ماژول فروش در حال توسعه</small></article>
+        <article className="stat"><span>فرصت‌های فروش</span><strong>نامشخص</strong><small>ماژول فروش در حال توسعه</small></article>
+        <article className="stat"><span>اعضای سازمان منتخب</span><strong>{members.length}</strong><small>اعضای سازمان انتخاب‌شده</small></article>
       </div>
+      <div className="section-heading" id="channels"><div><h2>وضعیت کانال‌های ارتباطی</h2><p>وضعیت فعلی اتصال‌ها؛ اتصال واقعی پس از ثبت اعتبارنامه هر سرویس فعال می‌شود.</p></div></div>
+      <section className="panel channel-panel"><div className="channel-table-wrap"><table className="channel-table"><thead><tr><th>کانال</th><th>نوع</th><th>وضعیت اتصال</th><th>آخرین تبادل داده</th></tr></thead><tbody>
+        {["Instagram","WhatsApp","Telegram","YouTube","TikTok","Facebook","ایتا","بله","روبیکا","سروش","گپ"].map((channel,i)=><tr key={channel}><td dir={i<6?"ltr":"rtl"}>{channel}</td><td>{i<6?"خارجی":"ایرانی"}</td><td><span className="connection-status">متصل نشده</span></td><td>—</td></tr>)}
+      </tbody></table></div></section>
 
       <div className="section-heading" id="organizations"><div><h2>مدیریت سازمان‌ها و برندها</h2><p>ثبت و مشاهده اطلاعات پایه از طریق API و PostgreSQL</p></div><button className="refresh-button" onClick={() => void loadOrganizations()} disabled={loading}>به‌روزرسانی</button></div>
       {error && <div className="feedback error" role="alert">{error}</div>}
