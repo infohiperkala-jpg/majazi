@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 type Organization = { id: string; name: string; slug: string; createdAt: string };
 type Brand = { id: string; organizationId: string; name: string; slug: string; createdAt: string };
 type Member = { userId: string; email: string; role: "Owner" | "Admin" | "Member"; createdAt: string };
+type DashboardSummary = { contacts: number; leads: number; openLeads: number; campaigns: number; activeCampaigns: number; connectedChannels: number; totalChannels: number; members: number; budget: number; spend: number; attributedRevenue: number; impressions: number; clicks: number; conversions: number; };
 
 const modules = [
   ["داشبورد مدیریت کل", "نمای کلی شاخص‌ها و فعالیت سامانه", "DB"],
@@ -44,6 +45,7 @@ export default function Home() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [memberEmail, setMemberEmail] = useState("");
   const [memberRole, setMemberRole] = useState<"Admin" | "Member">("Member");
   const [selectedId, setSelectedId] = useState("");
@@ -133,12 +135,15 @@ export default function Home() {
   useEffect(() => { if (authenticated) void loadOrganizations(); }, [authenticated, loadOrganizations]);
 
   useEffect(() => {
-    if (!selectedId) { setBrands([]); setMembers([]); return; }
+    if (!selectedId) { setBrands([]); setMembers([]); setDashboard(null); return; }
     let active = true;
     Promise.all([
       api<Brand[]>(`/api/organizations/${selectedId}/brands`),
       api<Member[]>(`/api/organizations/${selectedId}/members`),
-    ]).then(([brandData, memberData]) => { if (active) { setBrands(brandData); setMembers(memberData); } })
+      api<DashboardSummary>(`/api/organizations/${selectedId}/dashboard/summary`),
+    ]).then(([brandData, memberData, dashboardData]) => {
+      if (active) { setBrands(brandData); setMembers(memberData); setDashboard(dashboardData); }
+    })
       .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : "دریافت اطلاعات سازمان ناموفق بود."); });
     return () => { active = false; };
   }, [selectedId]);
@@ -294,13 +299,13 @@ export default function Home() {
       <div className="section-heading" id="status"><div><h2>داشبورد مدیریت کل</h2><p>نمای کلی وضعیت سازمان، ارتباطات و عملکرد بازاریابی</p></div><span className="pill">نسخه توسعه</span></div>
       <div className="stats">
         <article className="stat"><span>سازمان‌های فعال</span><strong>{loading ? "…" : organizations.length}</strong><small>داده مستقیم از پایگاه داده</small></article>
-        <article className="stat"><span>کانال‌های متصل</span><strong>۰</strong><small>هنوز اتصالی پیکربندی نشده</small></article>
-        <article className="stat"><span>پیام‌های ورودی</span><strong>نامشخص</strong><small>پس از راه‌اندازی صندوق ورودی</small></article>
-        <article className="stat"><span>محتوای منتشرشده</span><strong>نامشخص</strong><small>پس از فعال‌سازی استودیوی محتوا</small></article>
-        <article className="stat"><span>محتوای در انتظار تأیید</span><strong>نامشخص</strong><small>نیازمند گردش‌کار محتوا</small></article>
-        <article className="stat"><span>سرنخ‌های فروش</span><strong>نامشخص</strong><small>ماژول فروش در حال توسعه</small></article>
-        <article className="stat"><span>فرصت‌های فروش</span><strong>نامشخص</strong><small>ماژول فروش در حال توسعه</small></article>
-        <article className="stat"><span>اعضای سازمان منتخب</span><strong>{members.length}</strong><small>اعضای سازمان انتخاب‌شده</small></article>
+        <article className="stat"><span>کانال‌های متصل</span><strong>{dashboard?.connectedChannels ?? "—"}</strong><small>{dashboard ? `از ${dashboard.totalChannels} کانال ثبت‌شده` : "سازمان را انتخاب کنید"}</small></article>
+        <article className="stat"><span>مشتریان CRM</span><strong>{dashboard?.contacts ?? "—"}</strong><small>مخاطبان ثبت‌شده در سازمان</small></article>
+        <article className="stat"><span>سرنخ‌های فروش</span><strong>{dashboard?.leads ?? "—"}</strong><small>{dashboard ? `${dashboard.openLeads} سرنخ باز` : "داده سازمان"}</small></article>
+        <article className="stat"><span>کمپین‌های بازاریابی</span><strong>{dashboard?.campaigns ?? "—"}</strong><small>{dashboard ? `${dashboard.activeCampaigns} کمپین فعال` : "داده سازمان"}</small></article>
+        <article className="stat"><span>بودجه کمپین‌ها</span><strong>{dashboard ? dashboard.budget.toLocaleString("en-US") : "—"}</strong><small>مجموع بودجه ثبت‌شده</small></article>
+        <article className="stat"><span>هزینه انجام‌شده</span><strong>{dashboard ? dashboard.spend.toLocaleString("en-US") : "—"}</strong><small>مجموع هزینه واقعی کمپین‌ها</small></article>
+        <article className="stat"><span>اعضای سازمان منتخب</span><strong>{dashboard?.members ?? members.length}</strong><small>اعضای دارای دسترسی</small></article>
       </div>
       <div className="section-heading" id="channels"><div><h2>وضعیت کانال‌های ارتباطی</h2><p>وضعیت فعلی اتصال‌ها؛ اتصال واقعی پس از ثبت اعتبارنامه هر سرویس فعال می‌شود.</p></div></div>
       <section className="panel channel-panel"><div className="channel-table-wrap"><table className="channel-table"><thead><tr><th>کانال</th><th>نوع</th><th>وضعیت اتصال</th><th>آخرین تبادل داده</th></tr></thead><tbody>
