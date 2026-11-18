@@ -63,7 +63,12 @@ export default function ChannelsPage() {
       await reload(); setNotice("اطلاعات کانال به‌صورت امن ثبت شد. وضعیت اتصال باید پس از OAuth یا اعتبارسنجی رسمی تأیید شود.");
     });
   }
-  async function verify(item: Channel) {\n    await run(async () => {\n      const result = await request<{ username?: string; status: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/verify", token, { method: "POST" });\n      await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));\n    });\n  }\n  async function remove(item: Channel) {
+  async function verify(item: Channel) {
+    await run(async () => {
+      const result = await request<{ username?: string; status: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/verify", token, { method: "POST" });
+      await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));
+    });
+  }\n  async function remove(item: Channel) {
     if (!window.confirm("اتصال ثبت‌شده «" + item.displayName + "» حذف شود؟")) return;
     await run(async () => { await request("/api/organizations/" + organizationId + "/channels/" + item.id, token, { method: "DELETE" }); await reload(); setNotice("اطلاعات اتصال حذف شد."); });
   }
