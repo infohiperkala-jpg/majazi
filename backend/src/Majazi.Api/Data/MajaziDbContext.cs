@@ -13,6 +13,7 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<CrmLead> CrmLeads => Set<CrmLead>();
     public DbSet<CrmActivity> CrmActivities => Set<CrmActivity>();
     public DbSet<MarketingCampaign> MarketingCampaigns => Set<MarketingCampaign>();
+    public DbSet<SocialChannelConnection> SocialChannelConnections => Set<SocialChannelConnection>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -87,6 +88,21 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
         });
+
+        modelBuilder.Entity<SocialChannelConnection>(e =>
+        {
+            e.ToTable("social_channel_connections"); e.HasKey(x => x.Id);
+            e.Property(x => x.Provider).HasMaxLength(32).IsRequired();
+            e.Property(x => x.DisplayName).HasMaxLength(180).IsRequired();
+            e.Property(x => x.ExternalAccountId).HasMaxLength(180);
+            e.Property(x => x.EncryptedAccessToken).HasMaxLength(12000);
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.Provider, x.ExternalAccountId }).IsUnique();
+            e.HasIndex(x => new { x.OrganizationId, x.Status });
+            e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
+        });
+
         modelBuilder.Entity<CrmActivity>(e =>
         {
             e.ToTable("crm_activities"); e.HasKey(x => x.Id);
