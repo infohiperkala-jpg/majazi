@@ -129,3 +129,38 @@ public sealed class SocialChannelConnection
     public Organization? Organization { get; set; }
     public Brand? Brand { get; set; }
 }
+
+
+public sealed class InboxConversation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? ChannelConnectionId { get; set; }
+    public Guid? ContactId { get; set; }
+    public string? ExternalConversationId { get; set; }
+    public string? Subject { get; set; }
+    public string Status { get; set; } = "Open";
+    public Guid? AssignedToUserId { get; set; }
+    public DateTimeOffset LastMessageAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Organization? Organization { get; set; }
+    public SocialChannelConnection? ChannelConnection { get; set; }
+    public CrmContact? Contact { get; set; }
+    public ICollection<InboxMessage> Messages { get; set; } = new List<InboxMessage>();
+}
+
+public sealed class InboxMessage
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ConversationId { get; set; }
+    public string? ExternalMessageId { get; set; }
+    public string Direction { get; set; } = "Inbound";
+    public required string Body { get; set; }
+    public string Status { get; set; } = "Received";
+    public DateTimeOffset? SentAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? CreatedByUserId { get; set; }
+    public string? ProviderPayload { get; set; }
+    public InboxConversation? Conversation { get; set; }
+}
