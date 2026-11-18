@@ -321,4 +321,5 @@ static object IssueToken(AppUser user, IConfiguration config)
 public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? OrganizationSlug);
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
-public sealed record CreateBrandRequest(string? Name, string? Slug);\npublic sealed record AddMemberRequest(string? Email, string? Role);
+public sealed record CreateBrandRequest(string? Name, string? Slug);
+public sealed record AddMemberRequest(string? Email, string? Role);
