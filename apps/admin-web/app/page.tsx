@@ -79,6 +79,29 @@ export default function Home() {
     finally { setSaving(false); }
   }
 
+  async function deleteOrganization(org: Organization) {
+    if (!window.confirm(`سازمان «${org.name}» و تمام برندهای آن حذف شود؟`)) return;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      await api<void>(`/api/organizations/${org.id}`, { method: "DELETE" });
+      setOrganizations((items) => items.filter((x) => x.id !== org.id));
+      if (selectedId === org.id) { setSelectedId(""); setBrands([]); }
+      setNotice("سازمان و برندهای وابسته حذف شدند.");
+    } catch (e) { setError(e instanceof Error ? e.message : "حذف سازمان ناموفق بود."); }
+    finally { setSaving(false); }
+  }
+
+  async function deleteBrand(brand: Brand) {
+    if (!window.confirm(`برند «${brand.name}» حذف شود؟`)) return;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      await api<void>(`/api/brands/${brand.id}`, { method: "DELETE" });
+      setBrands((items) => items.filter((x) => x.id !== brand.id));
+      setNotice("برند حذف شد.");
+    } catch (e) { setError(e instanceof Error ? e.message : "حذف برند ناموفق بود."); }
+    finally { setSaving(false); }
+  }
+
   async function createBrand(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!selectedId) return;
     setSaving(true); setError(""); setNotice("");
@@ -121,7 +144,7 @@ export default function Home() {
           </form>
           <h3 className="subheading">فهرست سازمان‌ها</h3>
           {loading ? <p className="muted">در حال دریافت اطلاعات…</p> : organizations.length === 0 ? <p className="muted">هنوز سازمانی ثبت نشده است.</p> :
-            <div className="org-list">{organizations.map((org) => <button type="button" key={org.id} className={selectedId === org.id ? "org-item selected" : "org-item"} onClick={() => setSelectedId(org.id)}><span><strong>{org.name}</strong><small dir="ltr">{org.slug}</small></span><b>{selectedId === org.id ? "انتخاب‌شده" : "مشاهده برندها"}</b></button>)}</div>}
+            <div className="org-list">{organizations.map((org) => <div className="org-row" key={org.id}><button type="button" className={selectedId === org.id ? "org-item selected" : "org-item"} onClick={() => setSelectedId(org.id)}><span><strong>{org.name}</strong><small dir="ltr">{org.slug}</small></span><b>{selectedId === org.id ? "انتخاب‌شده" : "مشاهده برندها"}</b></button><button type="button" className="delete-button" disabled={saving} onClick={() => void deleteOrganization(org)} aria-label={`حذف سازمان ${org.name}`}>حذف</button></div>)}</div>}
         </section>
         <section className="panel">
           <h3>مدیریت برند سازمان</h3>
@@ -133,7 +156,7 @@ export default function Home() {
               <button type="submit" disabled={saving}>{saving ? "در حال ثبت…" : "ثبت برند"}</button>
             </form>
             <h3 className="subheading">برندهای ثبت‌شده</h3>
-            {brands.length === 0 ? <p className="muted">برای این سازمان برندی ثبت نشده است.</p> : <div className="org-list">{brands.map((brand) => <div className="org-item" key={brand.id}><span><strong>{brand.name}</strong><small dir="ltr">{brand.slug}</small></span><b>فعال</b></div>)}</div>}
+            {brands.length === 0 ? <p className="muted">برای این سازمان برندی ثبت نشده است.</p> : <div className="org-list">{brands.map((brand) => <div className="org-row" key={brand.id}><div className="org-item"><span><strong>{brand.name}</strong><small dir="ltr">{brand.slug}</small></span><b>فعال</b></div><button type="button" className="delete-button" disabled={saving} onClick={() => void deleteBrand(brand)} aria-label={`حذف برند ${brand.name}`}>حذف</button></div>)}</div>}
           </> : <p className="muted">ابتدا یک سازمان ایجاد یا انتخاب کنید.</p>}
         </section>
       </div>
