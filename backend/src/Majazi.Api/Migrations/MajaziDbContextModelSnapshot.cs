@@ -114,6 +114,11 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<string>("Channel").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
             b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
             b.Property<decimal>("Budget").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<decimal>("ActualSpend").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<decimal>("AttributedRevenue").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<long>("Impressions").HasColumnType("bigint");
+            b.Property<long>("Clicks").HasColumnType("bigint");
+            b.Property<long>("Conversions").HasColumnType("bigint");
             b.Property<DateTimeOffset?>("EndsAt").HasColumnType("timestamp with time zone");
             b.Property<string>("Name").IsRequired().HasMaxLength(200).HasColumnType("character varying(200)");
             b.Property<string>("Notes").HasMaxLength(4000).HasColumnType("character varying(4000)");
