@@ -21,6 +21,10 @@ services:
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set a unique JWT_SIGNING_KEY in .env}
       Jwt__Issuer: ${JWT_ISSUER:-majazi-api}
       Jwt__Audience: ${JWT_AUDIENCE:-majazi-web}
+      Meta__AppId: ${META_APP_ID:-}
+      Meta__AppSecret: ${META_APP_SECRET:-}
+      Meta__RedirectUri: ${META_REDIRECT_URI:-}
+      Meta__FrontendReturnUrl: ${META_FRONTEND_RETURN_URL:-/channels?meta=connected}
     volumes: [majazi-dataprotection:/var/lib/majazi/keys]
     ports: ["5080:8080"]
     depends_on:
