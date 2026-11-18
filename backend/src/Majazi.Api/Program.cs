@@ -826,6 +826,57 @@ channelsApi.MapDelete("/{connectionId:guid}", async (Guid organizationId, Guid c
     return Results.NoContent();
 });
 
+
+var dashboardApi = app.MapGroup("/api/organizations/{organizationId:guid}/dashboard").RequireAuthorization();
+dashboardApi.MapGet("/summary", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct))
+        return Results.NotFound();
+
+    var contacts = await db.CrmContacts.CountAsync(x => x.OrganizationId == organizationId, ct);
+    var leads = await db.CrmLeads.CountAsync(x => x.OrganizationId == organizationId, ct);
+    var openLeads = await db.CrmLeads.CountAsync(x => x.OrganizationId == organizationId && x.Stage != "Won" && x.Stage != "Lost", ct);
+    var campaigns = await db.MarketingCampaigns.CountAsync(x => x.OrganizationId == organizationId, ct);
+    var activeCampaigns = await db.MarketingCampaigns.CountAsync(x => x.OrganizationId == organizationId && x.Status == "Active", ct);
+    var connectedChannels = await db.SocialChannelConnections.CountAsync(x => x.OrganizationId == organizationId && x.Status == "Connected", ct);
+    var totalChannels = await db.SocialChannelConnections.CountAsync(x => x.OrganizationId == organizationId, ct);
+    var members = await db.OrganizationMemberships.CountAsync(x => x.OrganizationId == organizationId, ct);
+    var campaignTotals = await db.MarketingCampaigns.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId)
+        .GroupBy(_ => 1)
+        .Select(g => new
+        {
+            Budget = g.Sum(x => x.Budget),
+            Spend = g.Sum(x => x.ActualSpend),
+            Revenue = g.Sum(x => x.AttributedRevenue),
+            Impressions = g.Sum(x => x.Impressions),
+            Clicks = g.Sum(x => x.Clicks),
+            Conversions = g.Sum(x => x.Conversions)
+        })
+        .SingleOrDefaultAsync(ct);
+
+    return Results.Ok(new
+    {
+        organizationId,
+        contacts,
+        leads,
+        openLeads,
+        campaigns,
+        activeCampaigns,
+        connectedChannels,
+        totalChannels,
+        members,
+        budget = campaignTotals?.Budget ?? 0m,
+        spend = campaignTotals?.Spend ?? 0m,
+        attributedRevenue = campaignTotals?.Revenue ?? 0m,
+        impressions = campaignTotals?.Impressions ?? 0L,
+        clicks = campaignTotals?.Clicks ?? 0L,
+        conversions = campaignTotals?.Conversions ?? 0L,
+        updatedAt = DateTimeOffset.UtcNow
+    });
+});
+
 app.Run();
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
