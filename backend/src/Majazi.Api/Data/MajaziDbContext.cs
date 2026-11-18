@@ -9,6 +9,9 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
+    public DbSet<CrmContact> CrmContacts => Set<CrmContact>();
+    public DbSet<CrmLead> CrmLeads => Set<CrmLead>();
+    public DbSet<CrmActivity> CrmActivities => Set<CrmActivity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -41,6 +44,42 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.HasIndex(x => new { x.UserId, x.OrganizationId }).IsUnique();
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Organization).WithMany(x => x.Memberships).HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CrmContact>(e =>
+        {
+            e.ToTable("crm_contacts"); e.HasKey(x => x.Id);
+            e.Property(x => x.FullName).HasMaxLength(180).IsRequired();
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.Phone).HasMaxLength(40);
+            e.Property(x => x.Company).HasMaxLength(180);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
+            e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<CrmLead>(e =>
+        {
+            e.ToTable("crm_leads"); e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(240).IsRequired();
+            e.Property(x => x.Stage).HasMaxLength(32).IsRequired();
+            e.Property(x => x.EstimatedValue).HasPrecision(18, 2);
+            e.Property(x => x.Source).HasMaxLength(120);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.HasIndex(x => new { x.OrganizationId, x.Stage, x.CreatedAt });
+            e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Brand).WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Contact).WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<CrmActivity>(e =>
+        {
+            e.ToTable("crm_activities"); e.HasKey(x => x.Id);
+            e.Property(x => x.ActivityType).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Summary).HasMaxLength(1000).IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.OccurredAt });
+            e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Contact).WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.SetNull);
         });
     }
 }
