@@ -75,24 +75,42 @@ await using (var scope = app.Services.CreateAsyncScope())
 app.MapHealthChecks("/health");
 app.MapGet("/api", () => Results.Ok(new { name = "MAJAZI API", version = "0.3.0", status = "running" }));
 
+app.MapGet("/api/auth/captcha", (IMemoryCache cache) =>
+{
+    var answer = RandomNumberGenerator.GetInt32(0, 100000).ToString("D5");
+    var id = Guid.NewGuid().ToString("N");
+    cache.Set("register-captcha:" + id, answer, TimeSpan.FromMinutes(4));
+    var svg = $"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"220\" height=\"76\" viewBox=\"0 0 220 76\"><rect width=\"220\" height=\"76\" rx=\"10\" fill=\"#f1efff\"/><path d=\"M8 18L210 59M12 65L205 12M5 42L215 32\" stroke=\"#aaa1df\" stroke-width=\"2\" opacity=\".7\"/><text x=\"110\" y=\"52\" text-anchor=\"middle\" font-family=\"Arial,sans-serif\" font-size=\"38\" font-weight=\"700\" letter-spacing=\"9\" fill=\"#342b78\">{answer}</text></svg>";
+    var imageDataUrl = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(svg));
+    return Results.Ok(new { captchaId = id, imageDataUrl });
+}).RequireRateLimiting("auth");
+
 app.MapPost("/api/auth/register", async (RegisterRequest request, MajaziDbContext db,
-    IPasswordHasher<AppUser> hasher, IConfiguration config, CancellationToken ct) =>
+    IPasswordHasher<AppUser> hasher, IConfiguration config, IMemoryCache cache, CancellationToken ct) =>
 {
     var email = request.Email?.Trim().ToLowerInvariant();
     var password = request.Password;
     var orgName = request.OrganizationName?.Trim();
-    var orgSlug = request.OrganizationSlug?.Trim().ToLowerInvariant();
+    var captchaId = request.CaptchaId?.Trim();
+    var captchaAnswer = request.CaptchaAnswer?.Trim();
+    if (string.IsNullOrWhiteSpace(captchaId) || !cache.TryGetValue("register-captcha:" + captchaId, out string? expectedCaptcha))
+        return Results.BadRequest(new { error = "کد امنیتی منقضی شده است؛ تصویر جدید دریافت کنید." });
+    cache.Remove("register-captcha:" + captchaId);
+    var suppliedBytes = Encoding.UTF8.GetBytes(captchaAnswer ?? "");
+    var expectedBytes = Encoding.UTF8.GetBytes(expectedCaptcha ?? "");
+    if (suppliedBytes.Length != expectedBytes.Length || !CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes))
+        return Results.BadRequest(new { error = "کد امنیتی صحیح نیست؛ دوباره تلاش کنید." });
+    var orgSlug = "org-" + Guid.NewGuid().ToString("N")[..12];
     if (string.IsNullOrWhiteSpace(email) || email.Length > 320 || !email.Contains('@') ||
         string.IsNullOrWhiteSpace(password) || password.Length < 12 ||
         password.Length > 256 || !password.Any(char.IsUpper) || !password.Any(char.IsLower) || !password.Any(char.IsDigit) ||
-        string.IsNullOrWhiteSpace(orgName) || orgName.Length > 180 ||
-        string.IsNullOrWhiteSpace(orgSlug) || orgSlug.Length > 100)
+        string.IsNullOrWhiteSpace(orgName) || orgName.Length > 180)
         return Results.BadRequest(new { error = "اطلاعات نامعتبر است. گذرواژه باید حداقل ۱۲ نویسه و شامل حروف کوچک، بزرگ و عدد باشد." });
 
     if (await db.Users.AnyAsync(x => x.Email == email, ct))
         return Results.Conflict(new { error = "ثبت‌نام با این ایمیل امکان‌پذیر نیست." });
-    if (await db.Organizations.AnyAsync(x => x.Slug == orgSlug, ct))
-        return Results.Conflict(new { error = "شناسه سازمان قبلاً استفاده شده است." });
+    while (await db.Organizations.AnyAsync(x => x.Slug == orgSlug, ct))
+        orgSlug = "org-" + Guid.NewGuid().ToString("N")[..12];
 
     var user = new AppUser { Email = email, PasswordHash = "pending" };
     user.PasswordHash = hasher.HashPassword(user, password);
@@ -827,7 +845,7 @@ static object IssueToken(AppUser user, IConfiguration config)
 
 static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? OrganizationSlug);
+public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? CaptchaId, string? CaptchaAnswer);
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
 public sealed record CreateBrandRequest(string? Name, string? Slug);
