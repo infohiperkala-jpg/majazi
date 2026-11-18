@@ -397,7 +397,7 @@ crmApi.MapPatch("/leads/{leadId:guid}/stage", async (Guid organizationId, Guid l
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
-    if (request.Stage is null || !LeadStages.Contains(request.Stage)) return Results.BadRequest(new { error = "مرحله فروش معتبر نیست." });
+    if (request.Stage is null || !leadStages.Contains(request.Stage)) return Results.BadRequest(new { error = "مرحله فروش معتبر نیست." });
     var item = await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     item.Stage = request.Stage;
