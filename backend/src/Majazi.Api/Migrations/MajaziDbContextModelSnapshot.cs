@@ -33,6 +33,26 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Navigation("Brand"); b.Navigation("Organization");
         });
 
+
+        modelBuilder.Entity("Majazi.Api.Models.SocialChannelConnection", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid?>("BrandId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("DisplayName").IsRequired().HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("EncryptedAccessToken").HasMaxLength(12000).HasColumnType("character varying(12000)");
+            b.Property<string>("ExternalAccountId").HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Provider").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<string>("Status").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("BrandId");
+            b.HasIndex("OrganizationId", "Provider", "ExternalAccountId").IsUnique();
+            b.HasIndex("OrganizationId", "Status");
+            b.ToTable("social_channel_connections", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.OrganizationMembership", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -188,6 +208,13 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
                 .IsRequired();
             b.Navigation("Organization");
             b.Navigation("User");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.SocialChannelConnection", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Brand", "Brand").WithMany().HasForeignKey("BrandId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Brand"); b.Navigation("Organization");
         });
 
         modelBuilder.Entity("Majazi.Api.Models.Brand", b =>
