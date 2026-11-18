@@ -586,7 +586,7 @@ channelsApi.MapGet("/meta/connect", async (Guid organizationId, Guid? brandId, s
         ["state"] = state
     };
     var authorizeUrl = QueryHelpers.AddQueryString("https://www.instagram.com/oauth/authorize", query);
-    return Results.Redirect(authorizeUrl);
+    return Results.Ok(new { authorizationUrl = authorizeUrl });
 });
 
 app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, string? error,
@@ -658,7 +658,8 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
         existing.Status = "Connected";
         existing.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return Results.Content("<!doctype html><html lang='fa' dir='rtl'><meta charset='utf-8'><title>اتصال موفق</title><body style='font-family:sans-serif;padding:40px;text-align:center'><h2>اتصال اینستاگرام با موفقیت تأیید شد.</h2><p>می‌توانید این پنجره را ببندید و به پنل MAJAZI بازگردید.</p><a href='/channels'>بازگشت به پنل</a></body></html>", "text/html; charset=utf-8");
+        var returnUrl = config["Meta:FrontendReturnUrl"] ?? "/channels?meta=connected";
+        return Results.Content("<!doctype html><html lang='fa' dir='rtl'><meta charset='utf-8'><title>اتصال موفق</title><body style='font-family:sans-serif;padding:40px;text-align:center'><h2>اتصال اینستاگرام با موفقیت تأیید شد.</h2><p>توکن به‌صورت رمز‌شده ذخیره شد.</p><a href='" + System.Net.WebUtility.HtmlEncode(returnUrl) + "'>بازگشت به پنل MAJAZI</a></body></html>", "text/html; charset=utf-8");
     }
     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
     {
