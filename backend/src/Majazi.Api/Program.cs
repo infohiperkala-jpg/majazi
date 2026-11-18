@@ -8,10 +8,12 @@ using Majazi.Api.Data;
 using Majazi.Api.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.WebUtilities;
 using System.IO;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 
 var leadStages = new HashSet<string>(["New", "Qualified", "Proposal", "Negotiation", "Won", "Lost"]);
@@ -29,6 +31,8 @@ builder.Services.AddDataProtection()
     .SetApplicationName("MAJAZI")
     .PersistKeysToFileSystem(new DirectoryInfo(builder.Configuration["DataProtection:KeysPath"] ?? "/var/lib/majazi/keys"));
 builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12));
+builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -544,7 +548,129 @@ campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid ca
 });
 
 
+
 var channelsApi = app.MapGroup("/api/organizations/{organizationId:guid}/channels").RequireAuthorization();
+
+// Instagram Business Login: state is random, short-lived, one-time, and bound to the initiating user and organization.
+channelsApi.MapGet("/meta/configuration", (IConfiguration config) =>
+{
+    var ready = !string.IsNullOrWhiteSpace(config["Meta:AppId"]) &&
+        !string.IsNullOrWhiteSpace(config["Meta:AppSecret"]) &&
+        Uri.TryCreate(config["Meta:RedirectUri"], UriKind.Absolute, out var redirect) &&
+        redirect.Scheme == Uri.UriSchemeHttps;
+    return Results.Ok(new { instagramBusinessLoginReady = ready, redirectUriConfigured = ready });
+});
+channelsApi.MapGet("/meta/connect", async (Guid organizationId, Guid? brandId, string? displayName,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IMemoryCache cache, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var appId = config["Meta:AppId"];
+    var redirectUri = config["Meta:RedirectUri"];
+    if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(config["Meta:AppSecret"]) ||
+        !Uri.TryCreate(redirectUri, UriKind.Absolute, out var redirect) || redirect.Scheme != Uri.UriSchemeHttps)
+        return Results.Problem("تنظیمات Meta کامل نیست؛ App ID، App Secret و آدرس HTTPS بازگشت را در تنظیمات سرور وارد کنید.", statusCode: 503);
+    if (brandId is Guid selectedBrand && !await db.Brands.AnyAsync(x => x.Id == selectedBrand && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    var state = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+    cache.Set("meta-oauth:" + state, new MetaOAuthState(userId.Value, organizationId, brandId,
+        string.IsNullOrWhiteSpace(displayName) ? "Instagram Business" : displayName.Trim()[..Math.Min(displayName.Trim().Length, 180)]),
+        TimeSpan.FromMinutes(10));
+    var query = new Dictionary<string, string?>
+    {
+        ["client_id"] = appId, ["redirect_uri"] = redirectUri, ["response_type"] = "code",
+        ["scope"] = "instagram_business_basic,instagram_business_content_publish",
+        ["state"] = state
+    };
+    var authorizeUrl = QueryHelpers.AddQueryString("https://www.instagram.com/oauth/authorize", query);
+    return Results.Redirect(authorizeUrl);
+});
+
+app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, string? error,
+    string? error_description, IMemoryCache cache, IConfiguration config, IHttpClientFactory clients,
+    MajaziDbContext db, IDataProtectionProvider protection, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(state) || !cache.TryGetValue("meta-oauth:" + state, out MetaOAuthState? flow) || flow is null)
+        return Results.BadRequest("درخواست اتصال نامعتبر یا منقضی شده است. دوباره از پنل شروع کنید.");
+    cache.Remove("meta-oauth:" + state);
+    if (!string.IsNullOrWhiteSpace(error))
+        return Results.BadRequest("اتصال توسط کاربر لغو شد یا مجوز لازم صادر نشد.");
+    if (string.IsNullOrWhiteSpace(code))
+        return Results.BadRequest("کد تأیید از Meta دریافت نشد.");
+    if (!await IsMember(db, flow.UserId, flow.OrganizationId, ct))
+        return Results.Forbid();
+    var appId = config["Meta:AppId"];
+    var appSecret = config["Meta:AppSecret"];
+    var redirectUri = config["Meta:RedirectUri"];
+    if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(appSecret) || string.IsNullOrWhiteSpace(redirectUri))
+        return Results.Problem("تنظیمات اتصال Meta روی سرور کامل نیست.", statusCode: 503);
+
+    try
+    {
+        var client = clients.CreateClient("MetaOAuth");
+        using var exchange = await client.PostAsync("https://api.instagram.com/oauth/access_token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = appId, ["client_secret"] = appSecret, ["grant_type"] = "authorization_code",
+                ["redirect_uri"] = redirectUri, ["code"] = code
+            }), ct);
+        if (!exchange.IsSuccessStatusCode)
+            return Results.BadRequest("Meta کد مجوز را نپذیرفت. تنظیمات برنامه و Redirect URI را بررسی کنید.");
+        using var exchangeJson = await JsonDocument.ParseAsync(await exchange.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var shortToken = exchangeJson.RootElement.TryGetProperty("access_token", out var tokenNode) ? tokenNode.GetString() : null;
+        var externalId = exchangeJson.RootElement.TryGetProperty("user_id", out var idNode) ? idNode.ToString() : null;
+        if (string.IsNullOrWhiteSpace(shortToken) || string.IsNullOrWhiteSpace(externalId))
+            return Results.BadGateway("پاسخ مجوز Meta ناقص بود.");
+
+        var longUri = QueryHelpers.AddQueryString("https://graph.instagram.com/access_token",
+            new Dictionary<string, string?>
+            {
+                ["grant_type"] = "ig_exchange_token", ["client_secret"] = appSecret, ["access_token"] = shortToken
+            });
+        using var longResponse = await client.GetAsync(longUri, ct);
+        if (!longResponse.IsSuccessStatusCode)
+            return Results.BadGateway("تبدیل توکن کوتاه‌مدت به توکن بلندمدت ناموفق بود.");
+        using var longJson = await JsonDocument.ParseAsync(await longResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var longToken = longJson.RootElement.TryGetProperty("access_token", out var longNode) ? longNode.GetString() : null;
+        if (string.IsNullOrWhiteSpace(longToken))
+            return Results.BadGateway("توکن بلندمدت از Meta دریافت نشد.");
+
+        var existing = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
+            x.OrganizationId == flow.OrganizationId && x.Provider == "Instagram" && x.ExternalAccountId == externalId, ct);
+        if (existing is null)
+        {
+            existing = new SocialChannelConnection
+            {
+                OrganizationId = flow.OrganizationId, BrandId = flow.BrandId, Provider = "Instagram",
+                DisplayName = flow.DisplayName, ExternalAccountId = externalId
+            };
+            db.SocialChannelConnections.Add(existing);
+        }
+        else
+        {
+            existing.BrandId = flow.BrandId;
+            existing.DisplayName = flow.DisplayName;
+        }
+        existing.EncryptedAccessToken = protection.CreateProtector("Majazi.SocialConnections.v1").Protect(longToken);
+        existing.Status = "Connected";
+        existing.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Results.Content("<!doctype html><html lang='fa' dir='rtl'><meta charset='utf-8'><title>اتصال موفق</title><body style='font-family:sans-serif;padding:40px;text-align:center'><h2>اتصال اینستاگرام با موفقیت تأیید شد.</h2><p>می‌توانید این پنجره را ببندید و به پنل MAJAZI بازگردید.</p><a href='/channels'>بازگشت به پنل</a></body></html>", "text/html; charset=utf-8");
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    {
+        return Results.Problem("ارتباط با سرویس OAuth متا در زمان مقرر پاسخ نداد.", statusCode: 504);
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem("ارتباط با سرویس OAuth متا برقرار نشد.", statusCode: 502);
+    }
+});
+
+
 var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram"]);
 channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
@@ -713,3 +839,5 @@ public sealed record CrmActivityRequest(Guid? ContactId, Guid? LeadId, string? A
 public sealed record CampaignRequest(Guid? BrandId, string? Name, string? Objective, string? Channel, string? Status, decimal Budget, DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, string? Notes, decimal ActualSpend = 0, decimal AttributedRevenue = 0, long Impressions = 0, long Clicks = 0, long Conversions = 0);
 
 public sealed record SocialChannelRequest(Guid? BrandId, string? Provider, string? DisplayName, string? ExternalAccountId, string? AccessToken);
+
+record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string DisplayName);
