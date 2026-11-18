@@ -100,6 +100,11 @@ public sealed class MarketingCampaign
     public required string Channel { get; set; }
     public string Status { get; set; } = "Draft";
     public decimal Budget { get; set; }
+    public decimal ActualSpend { get; set; }
+    public decimal AttributedRevenue { get; set; }
+    public long Impressions { get; set; }
+    public long Clicks { get; set; }
+    public long Conversions { get; set; }
     public DateTimeOffset? StartsAt { get; set; }
     public DateTimeOffset? EndsAt { get; set; }
     public string? Notes { get; set; }
