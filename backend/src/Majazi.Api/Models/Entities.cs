@@ -89,3 +89,22 @@ public sealed class CrmActivity
     public CrmContact? Contact { get; set; }
     public CrmLead? Lead { get; set; }
 }
+
+public sealed class MarketingCampaign
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BrandId { get; set; }
+    public required string Name { get; set; }
+    public string? Objective { get; set; }
+    public required string Channel { get; set; }
+    public string Status { get; set; } = "Draft";
+    public decimal Budget { get; set; }
+    public DateTimeOffset? StartsAt { get; set; }
+    public DateTimeOffset? EndsAt { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Organization? Organization { get; set; }
+    public Brand? Brand { get; set; }
+}
