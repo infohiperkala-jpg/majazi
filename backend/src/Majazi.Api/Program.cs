@@ -574,7 +574,7 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         (credential is not null && (credential.Length < 8 || credential.Length > 8000)) ||
         (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct)))
         return Results.BadRequest(new { error = "اطلاعات کانال یا برند معتبر نیست." });
-    if (await db.SocialChannelConnections.AnyAsync(x => x.OrganizationId == organizationId &&
+    if (externalId is not null && await db.SocialChannelConnections.AnyAsync(x => x.OrganizationId == organizationId &&
         x.Provider == provider && x.ExternalAccountId == externalId, ct))
         return Results.Conflict(new { error = "این حساب کانال قبلاً در سازمان ثبت شده است." });
     var protector = protection.CreateProtector("Majazi.SocialConnections.v1");
@@ -622,10 +622,19 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
             .GetAsync($"https://api.telegram.org/bot{botToken}/getMe", ct);
         using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = payload.RootElement;
-        if (response.IsSuccessStatusCode && root.TryGetProperty("ok", out var ok) && ok.GetBoolean() &&
+        if (response.IsSuccessStatusCode && root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True &&
             root.TryGetProperty("result", out var result) && result.TryGetProperty("id", out var botId))
         {
-            item.ExternalAccountId = botId.ToString();
+            var verifiedBotId = botId.ToString();
+            if (await db.SocialChannelConnections.AnyAsync(x => x.Id != item.Id && x.OrganizationId == organizationId &&
+                x.Provider == "Telegram" && x.ExternalAccountId == verifiedBotId, ct))
+            {
+                item.Status = "VerificationFailed";
+                item.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return Results.Conflict(new { error = "این ربات قبلاً به‌عنوان کانال دیگری در همین سازمان ثبت شده است." });
+            }
+            item.ExternalAccountId = verifiedBotId;
             item.Status = "Connected";
             item.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
