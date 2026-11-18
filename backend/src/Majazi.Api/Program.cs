@@ -293,6 +293,147 @@ app.MapDelete("/api/brands/{id:guid}", async (Guid id, ClaimsPrincipal principal
     return Results.NoContent();
 });
 
+
+var crmApi = app.MapGroup("/api/organizations/{organizationId:guid}/crm").RequireAuthorization();
+
+crmApi.MapGet("/contacts", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, string? q, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var query = db.CrmContacts.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        query = query.Where(x => x.FullName.Contains(term) || (x.Email != null && x.Email.Contains(term)) || (x.Phone != null && x.Phone.Contains(term)) || (x.Company != null && x.Company.Contains(term)));
+    }
+    var items = await query.OrderByDescending(x => x.CreatedAt).Take(250)
+        .Select(x => new { x.Id, x.BrandId, x.FullName, x.Email, x.Phone, x.Company, x.Notes, x.CreatedAt }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+crmApi.MapPost("/contacts", async (Guid organizationId, CrmContactRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var name = request.FullName?.Trim();
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 180 ||
+        (request.Email?.Length ?? 0) > 320 || (request.Phone?.Length ?? 0) > 40 ||
+        (request.Company?.Length ?? 0) > 180 || (request.Notes?.Length ?? 0) > 4000)
+        return Results.BadRequest(new { error = "نام مخاطب الزامی است و طول اطلاعات باید معتبر باشد." });
+    if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    var item = new CrmContact { OrganizationId = organizationId, BrandId = request.BrandId, FullName = name,
+        Email = Clean(request.Email), Phone = Clean(request.Phone), Company = Clean(request.Company), Notes = Clean(request.Notes) };
+    db.CrmContacts.Add(item);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/crm/contacts/{item.Id}",
+        new { item.Id, item.BrandId, item.FullName, item.Email, item.Phone, item.Company, item.Notes, item.CreatedAt });
+});
+
+crmApi.MapPut("/contacts/{contactId:guid}", async (Guid organizationId, Guid contactId, CrmContactRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var item = await db.CrmContacts.SingleOrDefaultAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    var name = request.FullName?.Trim();
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 180 ||
+        (request.Email?.Length ?? 0) > 320 || (request.Phone?.Length ?? 0) > 40 ||
+        (request.Company?.Length ?? 0) > 180 || (request.Notes?.Length ?? 0) > 4000)
+        return Results.BadRequest(new { error = "نام مخاطب الزامی است و طول اطلاعات باید معتبر باشد." });
+    if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    item.FullName = name; item.BrandId = request.BrandId; item.Email = Clean(request.Email);
+    item.Phone = Clean(request.Phone); item.Company = Clean(request.Company); item.Notes = Clean(request.Notes);
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { item.Id, item.BrandId, item.FullName, item.Email, item.Phone, item.Company, item.Notes, item.CreatedAt });
+});
+
+crmApi.MapDelete("/contacts/{contactId:guid}", async (Guid organizationId, Guid contactId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var item = await db.CrmContacts.SingleOrDefaultAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    db.CrmContacts.Remove(item);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
+crmApi.MapGet("/leads", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, string? stage, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var query = db.CrmLeads.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(stage)) query = query.Where(x => x.Stage == stage);
+    var items = await query.OrderByDescending(x => x.UpdatedAt).Take(250)
+        .Select(x => new { x.Id, x.BrandId, x.ContactId, x.Title, x.Stage, x.EstimatedValue, x.Source, x.Notes, x.CreatedAt, x.UpdatedAt,
+            ContactName = x.Contact == null ? null : x.Contact.FullName }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var title = request.Title?.Trim();
+    var stage = request.Stage?.Trim() ?? "New";
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || !LeadStages.Contains(stage) ||
+        request.EstimatedValue < 0 || (request.Source?.Length ?? 0) > 120 || (request.Notes?.Length ?? 0) > 4000)
+        return Results.BadRequest(new { error = "عنوان، مرحله یا مبلغ فرصت فروش معتبر نیست." });
+    if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    if (request.ContactId is Guid contactId && !await db.CrmContacts.AnyAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "مخاطب انتخاب‌شده متعلق به این سازمان نیست." });
+    var item = new CrmLead { OrganizationId = organizationId, BrandId = request.BrandId, ContactId = request.ContactId,
+        Title = title, Stage = stage, EstimatedValue = request.EstimatedValue, Source = Clean(request.Source), Notes = Clean(request.Notes) };
+    db.CrmLeads.Add(item);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/crm/leads/{item.Id}", new { item.Id, item.Title, item.Stage, item.EstimatedValue, item.ContactId, item.BrandId, item.Source, item.Notes, item.CreatedAt, item.UpdatedAt });
+});
+
+crmApi.MapPatch("/leads/{leadId:guid}/stage", async (Guid organizationId, Guid leadId, UpdateLeadStageRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    if (request.Stage is null || !LeadStages.Contains(request.Stage)) return Results.BadRequest(new { error = "مرحله فروش معتبر نیست." });
+    var item = await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    item.Stage = request.Stage;
+    item.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { item.Id, item.Stage, item.UpdatedAt });
+});
+
+crmApi.MapGet("/activities", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var items = await db.CrmActivities.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+        .OrderByDescending(x => x.OccurredAt).Take(100)
+        .Select(x => new { x.Id, x.ContactId, x.LeadId, x.ActivityType, x.Summary, x.OccurredAt, x.CreatedByUserId }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+crmApi.MapPost("/activities", async (Guid organizationId, CrmActivityRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var type = request.ActivityType?.Trim();
+    var summary = request.Summary?.Trim();
+    if (type is not ("Note" or "Call" or "Email" or "Meeting" or "Task") || string.IsNullOrWhiteSpace(summary) || summary.Length > 1000)
+        return Results.BadRequest(new { error = "نوع و شرح فعالیت معتبر نیست." });
+    if (request.ContactId is Guid contactId && !await db.CrmContacts.AnyAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "مخاطب انتخاب‌شده متعلق به این سازمان نیست." });
+    if (request.LeadId is Guid leadId && !await db.CrmLeads.AnyAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "فرصت فروش انتخاب‌شده متعلق به این سازمان نیست." });
+    var item = new CrmActivity { OrganizationId = organizationId, ContactId = request.ContactId, LeadId = request.LeadId,
+        CreatedByUserId = userId.Value, ActivityType = type, Summary = summary, OccurredAt = request.OccurredAt ?? DateTimeOffset.UtcNow };
+    db.CrmActivities.Add(item);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/crm/activities/{item.Id}", new { item.Id, item.ContactId, item.LeadId, item.ActivityType, item.Summary, item.OccurredAt, item.CreatedByUserId });
+});
+
 app.Run();
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
@@ -325,3 +466,12 @@ public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
 public sealed record CreateBrandRequest(string? Name, string? Slug);
 public sealed record AddMemberRequest(string? Email, string? Role);
+
+static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+static readonly HashSet<string> LeadStages = ["New", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
+
+public sealed record CrmContactRequest(Guid? BrandId, string? FullName, string? Email, string? Phone, string? Company, string? Notes);
+public sealed record CrmLeadRequest(Guid? BrandId, Guid? ContactId, string? Title, string? Stage, decimal? EstimatedValue, string? Source, string? Notes);
+public sealed record UpdateLeadStageRequest(string? Stage);
+public sealed record CrmActivityRequest(Guid? ContactId, Guid? LeadId, string? ActivityType, string? Summary, DateTimeOffset? OccurredAt);
