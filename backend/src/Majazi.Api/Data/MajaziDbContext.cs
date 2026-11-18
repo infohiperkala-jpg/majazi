@@ -80,6 +80,8 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.Property(x => x.Channel).HasMaxLength(40).IsRequired();
             e.Property(x => x.Status).HasMaxLength(32).IsRequired();
             e.Property(x => x.Budget).HasPrecision(18, 2);
+            e.Property(x => x.ActualSpend).HasPrecision(18, 2);
+            e.Property(x => x.AttributedRevenue).HasPrecision(18, 2);
             e.Property(x => x.Notes).HasMaxLength(4000);
             e.HasIndex(x => new { x.OrganizationId, x.Status, x.StartsAt });
             e.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
