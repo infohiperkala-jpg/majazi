@@ -207,8 +207,15 @@ export default function Home() {
   }
 
   if (!authReady) return <main className="auth-shell"><section className="auth-card">در حال آماده‌سازی فضای امن…</section></main>;
-  if (!authenticated) return <main className="auth-shell">
-    <section className="auth-card">
+  if (!authenticated) return <main className="auth-shell auth-premium">
+    <section className="auth-showcase" aria-label="معرفی MAJAZI">
+      <div className="showcase-orbit orbit-one" /><div className="showcase-orbit orbit-two" />
+      <div className="showcase-top"><span className="showcase-symbol">M</span><span>MAJAZI <small>INTELLIGENT BUSINESS SUITE</small></span></div>
+      <div className="showcase-copy"><span className="showcase-kicker">THE FUTURE OF GROWTH</span><h2>تمام کسب‌وکار شما،<br/><em>هوشمند و یکپارچه.</em></h2><p>بازاریابی، فروش، ارتباط با مشتری و هوش مصنوعی؛ در یک مرکز فرماندهی قدرتمند.</p></div>
+      <div className="showcase-visual"><div className="visual-glow"/><div className="visual-core"><span>م</span><b>MAJAZI AI</b><small>BUSINESS INTELLIGENCE</small></div><div className="float-card float-card-a"><i/> <span>هوش مصنوعی فعال</span><b>ONLINE</b></div><div className="float-card float-card-b"><span className="mini-bars"><i/><i/><i/><i/><i/></span><span>رشد هوشمند کسب‌وکار</span></div></div>
+      <div className="showcase-foot"><span>SECURE WORKSPACE</span><span>قدرت گرفته از هوش مصنوعی</span></div>
+    </section>
+    <section className="auth-panel"><div className="auth-card">
       <div className="brand auth-brand"><span className="brand-mark">م</span><div><strong>MAJAZI</strong><small>فضای کاری هوشمند</small></div></div>
       <h1>{authMode === "login" ? "ورود به حساب کاربری" : "ساخت فضای کاری جدید"}</h1>
       <p className="auth-description">{authMode === "login" ? "برای دسترسی به سازمان‌ها و ابزارهای مدیریتی وارد شوید." : "حساب مدیر و سازمان اولیه شما به‌صورت امن ایجاد می‌شود."}</p>
@@ -226,7 +233,7 @@ export default function Home() {
       <button type="button" className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); setShowPassword(false); }}>
         {authMode === "login" ? "حساب ندارید؟ ثبت‌نام کنید" : "قبلاً حساب ساخته‌اید؟ وارد شوید"}
       </button>
-    </section>
+    </div></section>
   </main>;
 
   return <main className="shell">
