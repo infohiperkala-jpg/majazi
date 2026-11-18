@@ -1,0 +1,48 @@
+.inbox-shell{min-height:100vh;padding:34px clamp(16px,4vw,58px) 24px;background:radial-gradient(circle at 12% 0%,#e8efff 0,transparent 28%),#f5f7fb;color:#17223b;font-family:inherit}
+.inbox-header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:0 auto 26px;max-width:1500px}
+.inbox-header>div>span{font-size:10px;letter-spacing:2px;color:#61749b;font-weight:800}
+.inbox-header h1{font-size:clamp(25px,3vw,36px);margin:8px 0 5px;font-weight:850;letter-spacing:-.8px}
+.inbox-header p{margin:0;color:#78859c;font-size:13px}
+.inbox-header>a,.inbox-empty>a{color:#3859b7;text-decoration:none;font-weight:750;font-size:13px}
+.inbox-toolbar{max-width:1500px;margin:0 auto 16px;padding:15px 18px;background:#fff;border:1px solid #e8edf5;border-radius:17px;display:flex;align-items:end;gap:12px;box-shadow:0 8px 28px #23365c08}
+.inbox-toolbar label{display:grid;gap:7px;color:#66748c;font-size:12px;font-weight:700;min-width:190px}
+.inbox-toolbar input,.inbox-toolbar select,.inbox-chat-header select{height:40px;border:1px solid #e0e6f0;border-radius:10px;background:#fbfcff;padding:0 12px;color:#26344e;font:inherit;outline:none}
+.inbox-toolbar label:nth-child(2){flex:1}
+.inbox-toolbar button,.inbox-reply button{height:40px;border:0;border-radius:10px;background:#304fb1;color:white;padding:0 20px;font-weight:750;cursor:pointer}
+.inbox-toolbar button:disabled,.inbox-reply button:disabled{opacity:.5;cursor:not-allowed}
+.inbox-alert,.inbox-notice{max-width:1500px;margin:0 auto 12px;padding:12px 16px;border-radius:12px;font-size:13px}
+.inbox-alert{background:#fff0ef;color:#a53b35}.inbox-notice{background:#eaf8f1;color:#18744a}
+.inbox-layout{max-width:1500px;margin:auto;display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:16px;min-height:650px}
+.inbox-list-panel,.inbox-chat-panel{background:#fff;border:1px solid #e8edf5;border-radius:18px;box-shadow:0 8px 28px #23365c08;overflow:hidden}
+.inbox-list-heading{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 19px;border-bottom:1px solid #edf0f5}
+.inbox-list-heading h2,.inbox-chat-header h2{margin:0;font-size:16px;font-weight:850}.inbox-list-heading span{font-size:12px;color:#77849b}
+.inbox-filters{display:flex;gap:5px;padding:12px 13px;border-bottom:1px solid #edf0f5;overflow:auto}
+.inbox-filters button{border:0;border-radius:8px;padding:8px 11px;background:#f5f7fb;color:#68768e;white-space:nowrap;font-size:11px;font-weight:750;cursor:pointer}
+.inbox-filters button.active{background:#e9eeff;color:#3554b4}
+.inbox-conversation{display:block;width:100%;text-align:right;border:0;border-bottom:1px solid #f0f2f7;background:#fff;padding:15px 17px;cursor:pointer;color:inherit}
+.inbox-conversation:hover,.inbox-conversation.selected{background:#f5f7ff}
+.inbox-conversation.selected{box-shadow:inset -3px 0 #4967ca}
+.inbox-conversation-top,.inbox-conversation-meta{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.inbox-conversation-top strong{font-size:13px;font-weight:800}.inbox-conversation-top time{font-size:10px;color:#8b96a8;direction:ltr}
+.inbox-conversation-meta{margin-top:9px;color:#73819a;font-size:10px}
+.inbox-conversation>p{margin:9px 0 0;color:#7a879b;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.inbox-status{padding:4px 7px;border-radius:6px;background:#f0f2f6;color:#68768b}.status-open{background:#eaf2ff;color:#3d61b8}.status-pending{background:#fff5df;color:#9b6b16}.status-resolved{background:#e9f7f0;color:#2c805d}
+.inbox-chat-panel{display:flex;flex-direction:column;min-height:650px}
+.inbox-chat-header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:18px 22px;border-bottom:1px solid #edf0f5}
+.inbox-chat-header>div>span{font-size:10px;color:#8490a4}.inbox-chat-header h2{margin:4px 0}.inbox-chat-header small{font-size:11px;color:#8490a4}
+.inbox-chat-header select{min-width:135px}
+.inbox-messages{flex:1;min-height:350px;max-height:590px;overflow:auto;padding:24px;display:flex;flex-direction:column;gap:13px;background:linear-gradient(#fbfcff,#f8faff)}
+.inbox-message{max-width:min(78%,560px);padding:12px 15px;border-radius:14px;box-shadow:0 3px 12px #26385b0b}
+.inbox-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.9}
+.inbox-message footer{display:flex;gap:12px;margin-top:8px;color:#8994a6;font-size:9px}
+.inbox-message.inbound{align-self:flex-start;background:white;border:1px solid #edf0f5;border-bottom-right-radius:4px}
+.inbox-message.outbound{align-self:flex-end;background:#eaf0ff;border:1px solid #dce5ff;border-bottom-left-radius:4px}
+.inbox-reply{padding:15px 18px;border-top:1px solid #edf0f5;display:grid;grid-template-columns:1fr auto;gap:9px}
+.inbox-reply textarea{grid-column:1/-1;min-height:88px;resize:vertical;border:1px solid #e0e6f0;border-radius:12px;padding:12px;font:inherit;font-size:13px;outline:none}
+.inbox-reply small{grid-column:1/-1;color:#9a7a3e;font-size:10px;line-height:1.7}
+.inbox-select-prompt,.inbox-empty-state,.inbox-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:35px;color:#7d8aa0}
+.inbox-select-prompt{flex:1}.inbox-select-prompt>div{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:#edf1ff;color:#4965c1;font-size:25px}
+.inbox-select-prompt h2{font-size:17px;color:#394963;margin:17px 0 4px}.inbox-select-prompt p,.inbox-empty-state p{font-size:12px;line-height:1.8;max-width:300px}
+.inbox-empty-state strong{font-size:13px;color:#56657d}.inbox-footer{text-align:center;color:#a1aabc;font-size:9px;letter-spacing:1px;padding:24px 0 5px}
+.inbox-empty{max-width:600px;margin:15vh auto;background:white;border:1px solid #e8edf5;border-radius:18px}.inbox-empty h1{color:#243453}
+@media(max-width:850px){.inbox-shell{padding:22px 12px}.inbox-header{align-items:flex-start}.inbox-toolbar{flex-wrap:wrap}.inbox-toolbar label{flex:1;min-width:145px}.inbox-layout{grid-template-columns:1fr}.inbox-list-panel{max-height:460px;overflow:auto}.inbox-chat-panel{min-height:570px}.inbox-message{max-width:90%}}
