@@ -1,10 +1,12 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using Majazi.Api.Data;
 using Majazi.Api.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -33,6 +35,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("auth", limiter =>
+{
+    limiter.PermitLimit = 8;
+    limiter.Window = TimeSpan.FromMinutes(1);
+    limiter.QueueLimit = 0;
+    limiter.AutoReplenishment = true;
+}));
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
         .AllowAnyHeader().AllowAnyMethod()));
@@ -40,6 +49,7 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.UseCors();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -83,7 +93,7 @@ app.MapPost("/api/auth/register", async (RegisterRequest request, MajaziDbContex
     try { await db.SaveChangesAsync(ct); }
     catch (DbUpdateException) { return Results.Conflict(new { error = "ایمیل یا شناسه سازمان قبلاً ثبت شده است." }); }
     return Results.Ok(IssueToken(user, config));
-});
+}).RequireRateLimiting("auth");
 
 app.MapPost("/api/auth/login", async (LoginRequest request, MajaziDbContext db,
     IPasswordHasher<AppUser> hasher, IConfiguration config, CancellationToken ct) =>
@@ -95,7 +105,7 @@ app.MapPost("/api/auth/login", async (LoginRequest request, MajaziDbContext db,
     if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
         return Results.Unauthorized();
     return Results.Ok(IssueToken(user, config));
-});
+}).RequireRateLimiting("auth");
 
 app.MapGet("/api/auth/me", async (ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
