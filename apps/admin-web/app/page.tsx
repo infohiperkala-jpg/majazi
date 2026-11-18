@@ -306,6 +306,10 @@ export default function Home() {
         <article className="stat"><span>بودجه کمپین‌ها</span><strong>{dashboard ? dashboard.budget.toLocaleString("en-US") : "—"}</strong><small>مجموع بودجه ثبت‌شده</small></article>
         <article className="stat"><span>هزینه انجام‌شده</span><strong>{dashboard ? dashboard.spend.toLocaleString("en-US") : "—"}</strong><small>مجموع هزینه واقعی کمپین‌ها</small></article>
         <article className="stat"><span>اعضای سازمان منتخب</span><strong>{dashboard?.members ?? members.length}</strong><small>اعضای دارای دسترسی</small></article>
+        <article className="stat"><span>درآمد منتسب به کمپین‌ها</span><strong>{dashboard ? dashboard.attributedRevenue.toLocaleString("en-US") : "—"}</strong><small>مجموع درآمد ثبت‌شده</small></article>
+        <article className="stat"><span>نمایش تبلیغات</span><strong>{dashboard ? dashboard.impressions.toLocaleString("en-US") : "—"}</strong><small>مجموع نمایش کمپین‌ها</small></article>
+        <article className="stat"><span>کلیک‌های کمپین</span><strong>{dashboard ? dashboard.clicks.toLocaleString("en-US") : "—"}</strong><small>مجموع کلیک ثبت‌شده</small></article>
+        <article className="stat"><span>تبدیل‌های کمپین</span><strong>{dashboard ? dashboard.conversions.toLocaleString("en-US") : "—"}</strong><small>مجموع تبدیل ثبت‌شده</small></article>
       </div>
       <div className="section-heading" id="channels"><div><h2>وضعیت کانال‌های ارتباطی</h2><p>وضعیت فعلی اتصال‌ها؛ اتصال واقعی پس از ثبت اعتبارنامه هر سرویس فعال می‌شود.</p></div></div>
       <section className="panel channel-panel"><div className="channel-table-wrap"><table className="channel-table"><thead><tr><th>کانال</th><th>نوع</th><th>وضعیت اتصال</th><th>آخرین تبادل داده</th></tr></thead><tbody>
