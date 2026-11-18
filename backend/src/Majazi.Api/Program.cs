@@ -462,14 +462,13 @@ static object IssueToken(AppUser user, IConfiguration config)
     return new { accessToken = new JwtSecurityTokenHandler().WriteToken(token), tokenType = "Bearer", expiresAt = expires };
 }
 
+static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
 public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? OrganizationSlug);
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
 public sealed record CreateBrandRequest(string? Name, string? Slug);
 public sealed record AddMemberRequest(string? Email, string? Role);
-
-static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
 public sealed record CrmContactRequest(Guid? BrandId, string? FullName, string? Email, string? Phone, string? Company, string? Notes);
 public sealed record CrmLeadRequest(Guid? BrandId, Guid? ContactId, string? Title, string? Stage, decimal? EstimatedValue, string? Source, string? Notes);
 public sealed record UpdateLeadStageRequest(string? Stage);
