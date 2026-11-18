@@ -23,7 +23,7 @@ const modules = [
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/backend-api${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: { "Content-Type": "application/json", ...(typeof window !== "undefined" && localStorage.getItem("majazi_access_token") ? { Authorization: `Bearer ${localStorage.getItem("majazi_access_token")}` } : {}), ...init?.headers },
     cache: "no-store",
   });
   const payload = await response.json().catch(() => null);
@@ -43,6 +43,15 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authOrgName, setAuthOrgName] = useState("");
+  const [authOrgSlug, setAuthOrgSlug] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
 
   const loadOrganizations = useCallback(async () => {
     setLoading(true);
@@ -58,7 +67,11 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => { void loadOrganizations(); }, [loadOrganizations]);
+  useEffect(() => {
+    setAuthenticated(Boolean(localStorage.getItem("majazi_access_token")));
+    setAuthReady(true);
+  }, []);
+  useEffect(() => { if (authenticated) void loadOrganizations(); }, [authenticated, loadOrganizations]);
 
   useEffect(() => {
     if (!selectedId) { setBrands([]); return; }
@@ -68,6 +81,27 @@ export default function Home() {
       .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : "دریافت برندها ناموفق بود."); });
     return () => { active = false; };
   }, [selectedId]);
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setAuthBusy(true); setAuthError("");
+    try {
+      const payload = authMode === "login"
+        ? { email: authEmail, password: authPassword }
+        : { email: authEmail, password: authPassword, organizationName: authOrgName, organizationSlug: authOrgSlug };
+      const result = await api<{ accessToken: string }>(authMode === "login" ? "/api/auth/login" : "/api/auth/register", {
+        method: "POST", body: JSON.stringify(payload),
+      });
+      localStorage.setItem("majazi_access_token", result.accessToken);
+      setAuthenticated(true);
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : "ورود یا ثبت‌نام انجام نشد.");
+    } finally { setAuthBusy(false); }
+  }
+
+  function logout() {
+    localStorage.removeItem("majazi_access_token");
+    setAuthenticated(false); setOrganizations([]); setBrands([]); setSelectedId("");
+  }
 
   async function createOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError(""); setNotice("");
@@ -113,6 +147,28 @@ export default function Home() {
     finally { setSaving(false); }
   }
 
+  if (!authReady) return <main className="auth-shell"><section className="auth-card">در حال آماده‌سازی فضای امن…</section></main>;
+  if (!authenticated) return <main className="auth-shell">
+    <section className="auth-card">
+      <div className="brand auth-brand"><span className="brand-mark">م</span><div><strong>MAJAZI</strong><small>فضای کاری هوشمند</small></div></div>
+      <h1>{authMode === "login" ? "ورود به حساب کاربری" : "ساخت فضای کاری جدید"}</h1>
+      <p className="auth-description">{authMode === "login" ? "برای دسترسی به سازمان‌ها و ابزارهای مدیریتی وارد شوید." : "حساب مدیر و سازمان اولیه شما به‌صورت امن ایجاد می‌شود."}</p>
+      {authError && <div className="feedback error" role="alert">{authError}</div>}
+      <form className="data-form" onSubmit={submitAuth}>
+        <label>ایمیل<input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} autoComplete="email" required dir="ltr" placeholder="name@example.com" /></label>
+        <label>گذرواژه<input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete={authMode === "login" ? "current-password" : "new-password"} minLength={authMode === "register" ? 12 : 1} required dir="ltr" placeholder={authMode === "register" ? "حداقل ۱۲ نویسه، حروف بزرگ و کوچک و عدد" : "گذرواژه"} /></label>
+        {authMode === "register" && <>
+          <label>نام سازمان<input value={authOrgName} onChange={e => setAuthOrgName(e.target.value)} maxLength={180} required placeholder="نام سازمان شما" /></label>
+          <label>شناسه یکتای سازمان<input value={authOrgSlug} onChange={e => setAuthOrgSlug(e.target.value)} maxLength={100} required dir="ltr" placeholder="my-company" /></label>
+        </>}
+        <button type="submit" disabled={authBusy}>{authBusy ? "لطفاً صبر کنید…" : authMode === "login" ? "ورود امن" : "ایجاد حساب و سازمان"}</button>
+      </form>
+      <button type="button" className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>
+        {authMode === "login" ? "حساب ندارید؟ ثبت‌نام کنید" : "قبلاً حساب ساخته‌اید؟ وارد شوید"}
+      </button>
+    </section>
+  </main>;
+
   return <main className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">م</span><div><strong>MAJAZI</strong><small>هوشمندتر بازاریابی کن</small></div></div>
@@ -121,7 +177,7 @@ export default function Home() {
       <div className="sidebar-bottom"><i/> هسته سامانه در حال توسعه</div>
     </aside>
     <section className="content">
-      <header className="topbar"><div><span className="eyebrow">مرکز فرماندهی</span><h1>داشبورد مدیریت</h1></div><div className="profile"><span className="avatar">م</span>مدیر سامانه</div></header>
+      <header className="topbar"><div><span className="eyebrow">مرکز فرماندهی</span><h1>داشبورد مدیریت</h1></div><div className="profile"><span className="avatar">م</span>مدیر سامانه<button type="button" className="logout-button" onClick={logout}>خروج</button></div></header>
       <section className="welcome"><div><span className="eyebrow light">MARKETING &amp; SALES INTELLIGENCE</span><h2>بازاریابی و فروش، یکپارچه و هوشمند</h2><p>از شناخت مشتری تا تولید محتوا و مدیریت ارتباطات، همه‌چیز در یک فضای کاری.</p></div><b>م</b></section>
       <div className="section-heading" id="status"><div><h2>وضعیت هسته سامانه</h2><p>آمار سازمان‌ها و برندها مستقیماً از پایگاه داده خوانده می‌شود.</p></div><span className="pill">نسخه توسعه ۰.۲</span></div>
       <div className="stats">
