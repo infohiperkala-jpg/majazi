@@ -623,7 +623,7 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
         var shortToken = exchangeJson.RootElement.TryGetProperty("access_token", out var tokenNode) ? tokenNode.GetString() : null;
         var externalId = exchangeJson.RootElement.TryGetProperty("user_id", out var idNode) ? idNode.ToString() : null;
         if (string.IsNullOrWhiteSpace(shortToken) || string.IsNullOrWhiteSpace(externalId))
-            return Results.BadGateway("پاسخ مجوز Meta ناقص بود.");
+            return Results.Problem("پاسخ مجوز Meta ناقص بود.", statusCode: 502);
 
         var longUri = QueryHelpers.AddQueryString("https://graph.instagram.com/access_token",
             new Dictionary<string, string?>
@@ -632,11 +632,11 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
             });
         using var longResponse = await client.GetAsync(longUri, ct);
         if (!longResponse.IsSuccessStatusCode)
-            return Results.BadGateway("تبدیل توکن کوتاه‌مدت به توکن بلندمدت ناموفق بود.");
+            return Results.Problem("تبدیل توکن کوتاه‌مدت به توکن بلندمدت ناموفق بود.", statusCode: 502);
         using var longJson = await JsonDocument.ParseAsync(await longResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var longToken = longJson.RootElement.TryGetProperty("access_token", out var longNode) ? longNode.GetString() : null;
         if (string.IsNullOrWhiteSpace(longToken))
-            return Results.BadGateway("توکن بلندمدت از Meta دریافت نشد.");
+            return Results.Problem("توکن بلندمدت از Meta دریافت نشد.", statusCode: 502);
 
         var existing = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
             x.OrganizationId == flow.OrganizationId && x.Provider == "Instagram" && x.ExternalAccountId == externalId, ct);
