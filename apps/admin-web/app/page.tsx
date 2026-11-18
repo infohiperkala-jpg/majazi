@@ -88,7 +88,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (authMode === "register") void refreshCaptcha();
+    void refreshCaptcha();
   }, [authMode]);
 
   useEffect(() => {
@@ -112,7 +112,7 @@ export default function Home() {
     event.preventDefault(); setAuthBusy(true); setAuthError("");
     try {
       const payload = authMode === "login"
-        ? { email: authEmail, password: authPassword }
+        ? { email: authEmail, password: authPassword, captchaId, captchaAnswer }
         : { email: authEmail, password: authPassword, organizationName: authOrgName, captchaId, captchaAnswer };
       const result = await api<{ accessToken: string }>(authMode === "login" ? "/api/auth/login" : "/api/auth/register", {
         method: "POST", body: JSON.stringify(payload),
@@ -121,7 +121,7 @@ export default function Home() {
       setAuthenticated(true);
     } catch (e) {
       setAuthError(e instanceof Error ? e.message : "ورود یا ثبت‌نام انجام نشد.");
-      if (authMode === "register") await refreshCaptcha();
+      await refreshCaptcha();
     } finally { setAuthBusy(false); }
   }
 
@@ -211,8 +211,8 @@ export default function Home() {
         {authMode === "register" && <>
           <label>نام سازمان<input value={authOrgName} onChange={e => setAuthOrgName(e.target.value)} maxLength={180} required placeholder="نام سازمان شما" /></label>
           <div className="generated-id-note">شناسه یکتای سازمان به‌صورت خودکار و غیرتکراری توسط سامانه ساخته می‌شود.</div>
-          <div className="captcha-box"><div className="captcha-heading"><span>کد امنیتی تصویری</span><button type="button" onClick={() => void refreshCaptcha()} disabled={captchaBusy}>تغییر تصویر</button></div><div className="captcha-image">{captchaImage ? <img src={captchaImage} alt="کد امنیتی تصویری" /> : <span>در حال دریافت تصویر…</span>}</div><label>اعداد داخل تصویر را وارد کنید<input value={captchaAnswer} onChange={e => setCaptchaAnswer(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" autoComplete="off" required dir="ltr" maxLength={5} placeholder="۵ رقم" /></label></div>
         </>}
+        <div className="captcha-box"><div className="captcha-heading"><span>کد امنیتی تصویری</span><button type="button" onClick={() => void refreshCaptcha()} disabled={captchaBusy}>تغییر تصویر</button></div><div className="captcha-image">{captchaImage ? <img src={captchaImage} alt="کد امنیتی تصویری" /> : <span>در حال دریافت تصویر…</span>}</div><label>اعداد داخل تصویر را وارد کنید<input value={captchaAnswer} onChange={e => setCaptchaAnswer(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" autoComplete="off" required dir="ltr" maxLength={5} placeholder="۵ رقم" /></label></div>}
         <button type="submit" disabled={authBusy}>{authBusy ? "لطفاً صبر کنید…" : authMode === "login" ? "ورود امن" : "ایجاد حساب و سازمان"}</button>
       </form>
       <button type="button" className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); setShowPassword(false); }}>
