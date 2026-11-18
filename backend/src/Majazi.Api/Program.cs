@@ -186,6 +186,54 @@ organizationsApi.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal princip
     return Results.NoContent();
 });
 
+organizationsApi.MapGet("/{id:guid}/members", async (Guid id, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    if (!await IsMember(db, userId.Value, id, ct)) return Results.NotFound();
+    var members = await db.OrganizationMemberships.AsNoTracking().Where(x => x.OrganizationId == id)
+        .OrderBy(x => x.User!.Email)
+        .Select(x => new { userId = x.UserId, email = x.User!.Email, x.Role, x.CreatedAt })
+        .ToListAsync(ct);
+    return Results.Ok(members);
+});
+
+organizationsApi.MapPost("/{id:guid}/members", async (Guid id, AddMemberRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var actor = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == id, ct);
+    if (actor is null) return Results.NotFound();
+    if (actor.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var email = request.Email?.Trim().ToLowerInvariant();
+    var role = request.Role?.Trim();
+    if (string.IsNullOrWhiteSpace(email) || email.Length > 320 || role is not ("Admin" or "Member"))
+        return Results.BadRequest(new { error = "ایمیل معتبر و نقش Admin یا Member الزامی است." });
+    var target = await db.Users.SingleOrDefaultAsync(x => x.Email == email && x.IsActive, ct);
+    if (target is null) return Results.NotFound(new { error = "کاربری با این ایمیل پیدا نشد؛ ابتدا باید ثبت‌نام کند." });
+    if (await db.OrganizationMemberships.AnyAsync(x => x.UserId == target.Id && x.OrganizationId == id, ct))
+        return Results.Conflict(new { error = "این کاربر عضو سازمان است." });
+    db.OrganizationMemberships.Add(new OrganizationMembership { UserId = target.Id, OrganizationId = id, Role = role });
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{id}/members", new { userId = target.Id, email = target.Email, role });
+});
+
+organizationsApi.MapDelete("/{id:guid}/members/{memberId:guid}", async (Guid id, Guid memberId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var actor = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == id, ct);
+    if (actor is null) return Results.NotFound();
+    if (actor.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var target = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == memberId && x.OrganizationId == id, ct);
+    if (target is null) return Results.NotFound();
+    if (target.Role == "Owner" || (actor.Role != "Owner" && target.Role == "Admin"))
+        return Results.Forbid();
+    db.OrganizationMemberships.Remove(target);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
 organizationsApi.MapGet("/{id:guid}/brands", async (Guid id, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -273,4 +321,4 @@ static object IssueToken(AppUser user, IConfiguration config)
 public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? OrganizationSlug);
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
-public sealed record CreateBrandRequest(string? Name, string? Slug);
+public sealed record CreateBrandRequest(string? Name, string? Slug);\npublic sealed record AddMemberRequest(string? Email, string? Role);
