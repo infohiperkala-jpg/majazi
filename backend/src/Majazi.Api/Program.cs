@@ -37,7 +37,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("auth", limiter =>
 {
-    limiter.PermitLimit = 8;
+    limiter.PermitLimit = 60;
     limiter.Window = TimeSpan.FromMinutes(1);
     limiter.QueueLimit = 0;
     limiter.AutoReplenishment = true;
@@ -248,7 +248,9 @@ organizationsApi.MapPost("/{id:guid}/brands", async (Guid id, CreateBrandRequest
 {
     var userId = CurrentUserId(principal);
     if (userId is null) return Results.Unauthorized();
-    if (!await IsMember(db, userId.Value, id, ct)) return Results.NotFound();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == id, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
     var name = request.Name?.Trim(); var slug = request.Slug?.Trim().ToLowerInvariant();
     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(slug)) return Results.BadRequest(new { error = "نام و شناسه برند الزامی است." });
     if (name.Length > 180 || slug.Length > 100) return Results.BadRequest(new { error = "طول نام یا شناسه برند بیش از حد مجاز است." });
