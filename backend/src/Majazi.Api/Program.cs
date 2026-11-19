@@ -1722,11 +1722,25 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
     var externalId = Clean(request.ExternalConversationId);
     if ((subject?.Length ?? 0) > 240 || (externalId?.Length ?? 0) > 180)
         return Results.BadRequest(new { error = "طول عنوان یا شناسه مکالمه معتبر نیست." });
+    var initialStatus = await db.StatusDefinitions.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.Module == "inbox.conversation" && x.IsActive)
+        .OrderBy(x => x.SortOrder).Select(x => x.Key).FirstOrDefaultAsync(ct);
+    if (initialStatus is null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var defaults = defaultStatusesByModule["inbox.conversation"];
+        db.StatusDefinitions.AddRange(defaults.Select((x, index) => new StatusDefinition
+        {
+            OrganizationId = organizationId, Module = "inbox.conversation", Key = x.Key, Label = x.Label,
+            Color = x.Color, SortOrder = (index + 1) * 10, IsActive = true, CreatedAt = now, UpdatedAt = now
+        }));
+        initialStatus = defaults[0].Key;
+    }
     var item = new InboxConversation
     {
         OrganizationId = organizationId, ChannelConnectionId = request.ChannelConnectionId,
         ContactId = request.ContactId, Subject = subject, ExternalConversationId = externalId,
-        Status = "open", LastMessageAt = DateTimeOffset.UtcNow
+        Status = initialStatus, LastMessageAt = DateTimeOffset.UtcNow
     };
     db.InboxConversations.Add(item);
     await db.SaveChangesAsync(ct);
