@@ -64,6 +64,7 @@ public sealed class AutomationEngine : Migration
         migrationBuilder.CreateIndex("IX_automation_rules_OrganizationId_Trigger_IsEnabled", "automation_rules", new[] { "OrganizationId", "Trigger", "IsEnabled" });
         migrationBuilder.CreateIndex("IX_automation_runs_Status_CreatedAt", "automation_runs", new[] { "Status", "CreatedAt" });
         migrationBuilder.CreateIndex("IX_automation_runs_OrganizationId_RuleId_CreatedAt", "automation_runs", new[] { "OrganizationId", "RuleId", "CreatedAt" });
+        migrationBuilder.CreateIndex("IX_automation_runs_RuleId", "automation_runs", "RuleId");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
