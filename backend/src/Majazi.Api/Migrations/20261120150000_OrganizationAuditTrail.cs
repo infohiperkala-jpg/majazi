@@ -7,7 +7,7 @@ namespace Majazi.Api.Migrations;
 
 [DbContext(typeof(MajaziDbContext))]
 [Migration("20261120150000_OrganizationAuditTrail")]
-public sealed class OrganizationAuditTrail : Migration
+public partial class OrganizationAuditTrail : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
