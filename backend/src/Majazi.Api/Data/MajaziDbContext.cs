@@ -25,9 +25,22 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<AutomationRun> AutomationRuns => Set<AutomationRun>();
     public DbSet<KnowledgeArticle> KnowledgeArticles => Set<KnowledgeArticle>();
     public DbSet<KnowledgeArticleRevision> KnowledgeArticleRevisions => Set<KnowledgeArticleRevision>();
+    public DbSet<OrganizationAuditEvent> OrganizationAuditEvents => Set<OrganizationAuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<OrganizationAuditEvent>(e =>
+        {
+            e.ToTable("organization_audit_events"); e.HasKey(x => x.Id);
+            e.Property(x => x.Action).HasMaxLength(64).IsRequired();
+            e.Property(x => x.EntityType).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Summary).HasMaxLength(500).IsRequired();
+            e.Property(x => x.MetadataJson).HasColumnType("jsonb").IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
+            e.HasIndex(x => new { x.OrganizationId, x.Action, x.CreatedAt });
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<KnowledgeArticle>(e =>
         {
             e.ToTable("knowledge_articles"); e.HasKey(x => x.Id);
