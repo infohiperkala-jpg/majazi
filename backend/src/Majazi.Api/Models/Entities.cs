@@ -6,6 +6,8 @@ public sealed class Organization
     public required string Name { get; set; }
     public required string Slug { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public bool GrowthAgentEnabled { get; set; }
+    public DateTimeOffset? GrowthAgentLastRunAt { get; set; }
     public ICollection<Brand> Brands { get; set; } = new List<Brand>();
     public ICollection<OrganizationMembership> Memberships { get; set; } = new List<OrganizationMembership>();
 }
