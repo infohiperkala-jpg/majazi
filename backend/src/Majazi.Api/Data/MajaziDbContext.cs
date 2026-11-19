@@ -51,6 +51,7 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.Property(x => x.Error).HasMaxLength(1000);
             e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasIndex(x => new { x.OrganizationId, x.RuleId, x.CreatedAt });
+            e.HasIndex(x => x.RuleId);
             e.HasOne<AutomationRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
         });
