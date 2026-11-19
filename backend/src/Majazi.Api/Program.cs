@@ -1080,6 +1080,29 @@ contentApi.MapPost("/drafts/{draftId:guid}/cancel-schedule", async (Guid organiz
     return Results.Ok(new { draft.Id, draft.Status });
 });
 
+contentApi.MapGet("/calendar", async (Guid organizationId, ClaimsPrincipal principal,
+    MajaziDbContext db, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var rangeStart = from ?? DateTimeOffset.UtcNow.AddDays(-30);
+    var rangeEnd = to ?? DateTimeOffset.UtcNow.AddDays(90);
+    if (rangeEnd <= rangeStart || rangeEnd - rangeStart > TimeSpan.FromDays(366))
+        return Results.BadRequest(new { error = "بازه تقویم باید معتبر و حداکثر ۳۶۶ روز باشد." });
+
+    var items = await db.ContentDrafts.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId &&
+            ((x.ScheduledAt >= rangeStart && x.ScheduledAt < rangeEnd) ||
+             (x.PublishedAt >= rangeStart && x.PublishedAt < rangeEnd)))
+        .OrderBy(x => x.ScheduledAt ?? x.PublishedAt)
+        .Select(x => new
+        {
+            x.Id, x.Title, x.Channel, x.Status, x.ScheduledAt, x.PublishedAt,
+            x.PublishTarget, x.PublishError, x.UpdatedAt
+        }).Take(500).ToListAsync(ct);
+    return Results.Ok(new { from = rangeStart, to = rangeEnd, items });
+});
+
 contentApi.MapGet("/drafts", async (Guid organizationId, ClaimsPrincipal principal,
     MajaziDbContext db, string? status, string? q, CancellationToken ct) =>
 {
