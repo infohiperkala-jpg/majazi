@@ -37,6 +37,7 @@ export default function InboxPage() {
   const [selected,setSelected] = useState("");
   const [messages,setMessages] = useState<Message[]>([]);
   const [status,setStatus] = useState("All");
+  const [assignment,setAssignment] = useState("all");
   const [search,setSearch] = useState("");
   const [reply,setReply] = useState("");
   const [busy,setBusy] = useState(false);
@@ -45,7 +46,7 @@ export default function InboxPage() {
   async function loadConversations(org=organizationId, access=token) {
     if (!org || !access) return;
     const [result, configuredStatuses, templates, team] = await Promise.all([
-      api<{items:Conversation[]}>("/api/organizations/"+org+"/inbox/conversations?status="+encodeURIComponent(status)+"&q="+encodeURIComponent(search),access),
+      api<{items:Conversation[];total:number}>("/api/organizations/"+org+"/inbox/conversations?status="+encodeURIComponent(status)+"&q="+encodeURIComponent(search)+"&assignment="+encodeURIComponent(assignment==="all"?"":assignment),access),
       api<StatusOption[]>("/api/organizations/"+org+"/statuses?module=inbox.conversation",access),
       api<TextTemplate[]>("/api/organizations/"+org+"/text-templates?module=inbox",access),
       api<InboxAssignee[]>("/api/organizations/"+org+"/inbox/assignees",access)
@@ -66,7 +67,7 @@ export default function InboxPage() {
     if(saved) api<Organization[]>("/api/organizations",saved).then(list=>{setOrganizations(list);setOrganizationId(list[0]?.id??"");})
       .catch(e=>setError(e instanceof Error?e.message:"دریافت سازمان‌ها ناموفق بود."));
   },[]);
-  useEffect(()=>{if(organizationId&&token)loadConversations(organizationId,token).catch(e=>setError(e instanceof Error?e.message:"بارگذاری صندوق ورودی ناموفق بود."));},[organizationId,token,status]);
+  useEffect(()=>{if(organizationId&&token)loadConversations(organizationId,token).catch(e=>setError(e instanceof Error?e.message:"بارگذاری صندوق ورودی ناموفق بود."));},[organizationId,token,status,assignment]);
   useEffect(()=>{if(selected&&organizationId&&token)loadMessages(selected,organizationId,token).catch(e=>setError(e instanceof Error?e.message:"دریافت پیام‌ها ناموفق بود."));},[selected,organizationId,token]);
   async function run(action:()=>Promise<void>) {
     setBusy(true);setError("");setNotice("");
@@ -129,10 +130,10 @@ export default function InboxPage() {
     <div className="inbox-toolbar"><label>سازمان<select value={organizationId} onChange={e=>{setOrganizationId(e.target.value);setSelected("");}}>{organizations.map(o=><option key={o.id} value={o.id}>{o.name} · {o.role}</option>)}</select></label><label>جست‌وجوی مکالمه<input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void run(()=>loadConversations());}} placeholder="نام مخاطب یا متن پیام"/></label><button disabled={busy} onClick={()=>void run(()=>loadConversations())}>جست‌وجو</button></div>
     {error&&<div className="inbox-alert" role="alert">{error}</div>}{notice&&<div className="inbox-notice" role="status">{notice}</div>}
     <div className="inbox-layout">
-      <aside className="inbox-list-panel"><div className="inbox-list-heading"><h2>مکالمات</h2><div><span>{items.length.toLocaleString("en-US")}</span><button type="button" className="inbox-new-button" disabled={busy||!organizationId} onClick={()=>void createConversation()}>مکالمه جدید +</button></div></div><div className="inbox-filters">{[["All","همه"],...statusOptions.map(x=>[x.key,x.label])].map(([id,label])=><button key={id} className={status===id?"active":""} onClick={()=>setStatus(id)}>{label}</button>)}</div>
+      <aside className="inbox-list-panel"><div className="inbox-list-heading"><h2>مکالمات</h2><div><span>{items.length.toLocaleString("en-US")}</span><button type="button" className="inbox-new-button" disabled={busy||!organizationId} onClick={()=>void createConversation()}>مکالمه جدید +</button></div></div><div className="inbox-filters">{[["All","همه"],...statusOptions.map(x=>[x.key,x.label])].map(([id,label])=><button key={id} className={status===id?"active":""} onClick={()=>setStatus(id)}>{label}</button>)}</div><div className="inbox-assignment-filters" aria-label="فیلتر مسئول مکالمه">{[["all","همه مسئول‌ها"],["me","مکالمات من"],["unassigned","بدون مسئول"]].map(([id,label])=><button type="button" key={id} className={assignment===id?"active":""} onClick={()=>setAssignment(id)}>{label}</button>)}</div>
         {items.length===0?<div className="inbox-empty-state"><strong>مکالمه‌ای وجود ندارد</strong><p>با دریافت پیام از کانال‌ها یا ایجاد مکالمه، گفتگوها اینجا نمایش داده می‌شوند.</p></div>:items.map(item=><button key={item.id} className={"inbox-conversation "+(selected===item.id?"selected":"")} onClick={()=>setSelected(item.id)}>
           <div className="inbox-conversation-top"><strong>{item.contactName||item.subject||item.channelName||"مکالمه بدون عنوان"}</strong><time>{new Date(item.lastMessageAt).toLocaleDateString("en-US")}</time></div>
-          <div className="inbox-conversation-meta"><span>{item.channel||"دستی"}{item.channelName?" · "+item.channelName:""}</span><span className={"inbox-status status-"+item.status.toLowerCase()}>{statusOptions.find(x=>x.key.toLowerCase()===item.status.toLowerCase())?.label??labels[item.status]??item.status}</span></div>
+          <div className="inbox-conversation-meta"><span>{item.channel||"دستی"}{item.channelName?" · "+item.channelName:""} · {assignees.find(x=>x.id===item.assignedToUserId)?.email||"بدون مسئول"}</span><span className={"inbox-status status-"+item.status.toLowerCase()}>{statusOptions.find(x=>x.key.toLowerCase()===item.status.toLowerCase())?.label??labels[item.status]??item.status}</span></div>
           <p>{item.lastDirection==="Outbound"?"شما: ":""}{item.lastMessage||"هنوز پیامی ثبت نشده است."}</p>
         </button>)}
       </aside>
