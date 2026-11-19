@@ -2218,6 +2218,59 @@ automationApi.MapDelete("/rules/{ruleId:guid}", async (Guid organizationId, Guid
     return Results.NoContent();
 });
 
+automationApi.MapPost("/rules/{ruleId:guid}/run-now", async (Guid organizationId, Guid ruleId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+
+    var rule = await db.AutomationRules.SingleOrDefaultAsync(x => x.Id == ruleId && x.OrganizationId == organizationId, ct);
+    if (rule is null) return Results.NotFound();
+    if (!rule.IsEnabled) return Results.Conflict(new { error = "برای اجرای دستی، ابتدا قانون را فعال کنید." });
+
+    string subjectType;
+    Guid subjectId;
+    object payload;
+    if (rule.Trigger == "ContactCreated")
+    {
+        var contact = await db.CrmContacts.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+        if (contact is null) return Results.Conflict(new { error = "برای اجرای این قانون، ابتدا یک مخاطب در CRM ثبت کنید." });
+        subjectType = "Contact";
+        subjectId = contact.Id;
+        payload = new { manual = true, requestedBy = userId.Value, contactId = contact.Id };
+    }
+    else
+    {
+        var lead = await db.CrmLeads.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.UpdatedAt).FirstOrDefaultAsync(ct);
+        if (lead is null) return Results.Conflict(new { error = "برای اجرای این قانون، ابتدا یک سرنخ فروش در CRM ثبت کنید." });
+        subjectType = "Lead";
+        subjectId = lead.Id;
+        payload = new { manual = true, requestedBy = userId.Value, leadId = lead.Id };
+    }
+
+    var run = new AutomationRun
+    {
+        OrganizationId = organizationId, RuleId = rule.Id, Trigger = rule.Trigger,
+        SubjectType = subjectType, SubjectId = subjectId,
+        PayloadJson = JsonSerializer.Serialize(payload), Status = "Pending"
+    };
+    db.AutomationRuns.Add(run);
+    RecordAuditEvent(db, organizationId, userId.Value, "automation.run_requested", "AutomationRun", run.Id,
+        $"اجرای دستی قانون «{rule.Name}» برای آخرین رکورد مرتبط به صف افزوده شد.",
+        new { ruleId = rule.Id, subjectType, subjectId });
+    await db.SaveChangesAsync(ct);
+    return Results.Accepted($"/api/organizations/{organizationId}/automations/runs", new
+    {
+        run.Id, run.RuleId, run.Trigger, run.SubjectType, run.SubjectId, run.Status, run.CreatedAt,
+        message = "اجرا به صف پس‌زمینه افزوده شد؛ نتیجه در تاریخچه اجرا قابل مشاهده است."
+    });
+});
+
 automationApi.MapGet("/runs", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, int? take, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
