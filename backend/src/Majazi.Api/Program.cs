@@ -1495,6 +1495,9 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
         actionType is not ("CreateActivity" or "UpdateLeadStage") ||
         string.IsNullOrWhiteSpace(actionValue) || actionValue.Length > 1000 ||
         (request.ConditionValue?.Length ?? 0) > 240 ||
+        (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
+        ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
+        (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
         (actionType == "UpdateLeadStage" && trigger == "ContactCreated") ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
         return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
@@ -1537,6 +1540,9 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
         actionType is not ("CreateActivity" or "UpdateLeadStage") ||
         string.IsNullOrWhiteSpace(actionValue) || actionValue.Length > 1000 ||
         (request.ConditionValue?.Length ?? 0) > 240 ||
+        (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
+        ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
+        (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
         (actionType == "UpdateLeadStage" && trigger == "ContactCreated") ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
         return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
@@ -1562,7 +1568,8 @@ automationApi.MapDelete("/rules/{ruleId:guid}", async (Guid organizationId, Guid
     if (role is not ("Owner" or "Admin")) return Results.Forbid();
     var rule = await db.AutomationRules.SingleOrDefaultAsync(x => x.Id == ruleId && x.OrganizationId == organizationId, ct);
     if (rule is null) return Results.NotFound();
-    db.AutomationRules.Remove(rule);
+    rule.IsEnabled = false;
+    rule.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
