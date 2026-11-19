@@ -29,6 +29,10 @@ services:
       AI__BaseUrl: ${AI_BASE_URL:-https://api.openai.com/v1}
       AI__ApiKey: ${AI_API_KEY:-}
       AI__Model: ${AI_MODEL:-gpt-4o-mini}
+      Network__InternationalDefaultProxy: ${NETWORK_INTERNATIONAL_DEFAULT_PROXY:-}
+      Network__TelegramProxy: ${NETWORK_TELEGRAM_PROXY:-}
+      Network__MetaProxy: ${NETWORK_META_PROXY:-}
+      Network__AIProxy: ${NETWORK_AI_PROXY:-}
     volumes: [majazi-dataprotection:/var/lib/majazi/keys]
     ports: ["5080:8080"]
     depends_on:
