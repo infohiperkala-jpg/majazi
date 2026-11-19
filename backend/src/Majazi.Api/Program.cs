@@ -2892,8 +2892,6 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
         return Results.BadRequest(new { error = "شناسه مقصد ایتا معتبر نیست." });
     if (connection.Provider == "WhatsApp" && !IsValidWhatsAppTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شماره مقصد واتساپ باید با کد کشور و فقط شامل ارقام باشد." });
-    if (connection.Provider == "WhatsApp" && !IsValidWhatsAppTarget(request.TargetChatId))
-        return Results.BadRequest(new { error = "شماره مقصد واتساپ باید با کد کشور و فقط شامل ارقام باشد." });
     if (draft.Channel != connection.Provider) return Results.BadRequest(new { error = "پلتفرم محتوا باید با پلتفرم اتصال انتخاب‌شده یکسان باشد." });
     draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
@@ -2915,8 +2913,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
         return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام، ایتا یا واتساپ قابل انتشار است." });
     if (draft.Channel == "Telegram" && draft.Content.Length > 4096)
         return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
-    if (draft.Channel == "Telegram" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct) && draft.Content.Length > 1024)
-        return Results.BadRequest(new { error = "متن همراه فایل تلگرام حداکثر ۱۰۲۴ نویسه است." });
+    if (draft.Channel is "Telegram" or "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct) && draft.Content.Length > 1024)
+        return Results.BadRequest(new { error = "متن همراه فایل تلگرام و واتساپ حداکثر ۱۰۲۴ نویسه است." });
     if (!IsValidTelegramChatTarget(request.TargetChatId) && !IsValidEitaaTarget(request.TargetChatId) && !IsValidWhatsAppTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شماره واتساپ را با کد کشور وارد کنید؛ برای تلگرام و ایتا شناسه چت یا نام کاربری معتبر است." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
@@ -2926,6 +2924,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
         return Results.BadRequest(new { error = "شناسه مقصد تلگرام معتبر نیست." });
     if (connection.Provider == "Eitaa" && !IsValidEitaaTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شناسه مقصد ایتا معتبر نیست." });
+    if (connection.Provider == "WhatsApp" && !IsValidWhatsAppTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شماره مقصد واتساپ باید با کد کشور و فقط شامل ارقام باشد." });
     draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
     draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
