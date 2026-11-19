@@ -2026,6 +2026,16 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
     var externalMessageId = messageIdElement.ToString();
     var body = telegramMessage.TryGetProperty("text", out var textElement) ? textElement.GetString() :
         telegramMessage.TryGetProperty("caption", out var captionElement) ? captionElement.GetString() : null;
+    var telegramMediaTypes = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
+    var mediaTypeForMessage = telegramMediaTypes.FirstOrDefault(name => telegramMessage.TryGetProperty(name, out _));
+    if (string.IsNullOrWhiteSpace(body) && mediaTypeForMessage is not null)
+        body = mediaTypeForMessage switch
+        {
+            "photo" => "[تصویر تلگرام]", "video" => "[ویدئوی تلگرام]",
+            "audio" or "voice" => "[پیام صوتی تلگرام]", "document" => "[سند تلگرام]",
+            "animation" => "[تصویر متحرک تلگرام]", "sticker" => "[استیکر تلگرام]",
+            "video_note" => "[ویدئوی گرد تلگرام]", _ => "[رسانه تلگرام]"
+        };
     if (string.IsNullOrWhiteSpace(body)) return Results.Ok(new { accepted = true, ignored = true });
     if (body.Length > 10000) body = body[..10000];
 
@@ -2059,7 +2069,8 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
         receivedAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
     var inboxMessage = new InboxMessage {
         ConversationId = conversation.Id, ExternalMessageId = externalMessageId,
-        Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt
+        Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt,
+        ProviderPayload = JsonSerializer.Serialize(telegramMessage)
     };
     db.InboxMessages.Add(inboxMessage);
     await QueueAutomationRunsAsync(db, channel.OrganizationId, "InboxMessageReceived", "InboxMessage", inboxMessage.Id,
@@ -3452,9 +3463,25 @@ inboxApi.MapGet("/conversations/{conversationId:guid}/messages", async (Guid org
                 using var payload = JsonDocument.Parse(message.ProviderPayload);
                 var root = payload.RootElement;
                 mediaType = root.TryGetProperty("type", out var type) ? type.GetString() : null;
-                mediaAvailable = mediaType is "image" or "audio" or "video" or "document" or "sticker" &&
-                    root.TryGetProperty(mediaType, out var media) && media.TryGetProperty("id", out var mediaId) &&
-                    !string.IsNullOrWhiteSpace(mediaId.GetString());
+                if (mediaType is not null)
+                    mediaAvailable = mediaType is "image" or "audio" or "video" or "document" or "sticker" &&
+                        root.TryGetProperty(mediaType, out var media) && media.TryGetProperty("id", out var mediaId) &&
+                        !string.IsNullOrWhiteSpace(mediaId.GetString());
+                else
+                {
+                    var telegramTypes = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
+                    mediaType = telegramTypes.FirstOrDefault(name => root.TryGetProperty(name, out _));
+                    if (mediaType is not null && root.TryGetProperty(mediaType, out var telegramMedia))
+                    {
+                        var file = telegramMedia.ValueKind == JsonValueKind.Array && telegramMedia.GetArrayLength() > 0
+                            ? telegramMedia[telegramMedia.GetArrayLength() - 1] : telegramMedia;
+                        mediaAvailable = file.ValueKind == JsonValueKind.Object &&
+                            file.TryGetProperty("file_id", out var fileId) && !string.IsNullOrWhiteSpace(fileId.GetString());
+                        if (mediaType is "voice" or "audio") mediaType = "audio";
+                        else if (mediaType is "photo") mediaType = "image";
+                        else if (mediaType is "animation") mediaType = "video";
+                    }
+                }
             }
             catch (JsonException) { }
         }
@@ -3473,6 +3500,98 @@ inboxApi.MapGet("/messages/{messageId:guid}/media", async (Guid organizationId, 
     var message = await db.InboxMessages.AsNoTracking()
         .Include(x => x.Conversation).ThenInclude(x => x!.ChannelConnection)
         .SingleOrDefaultAsync(x => x.Id == messageId && x.Conversation!.OrganizationId == organizationId, ct);
+    if (message?.Conversation?.ChannelConnection?.Provider == "Telegram")
+    {
+        if (string.IsNullOrWhiteSpace(message.ProviderPayload) ||
+            string.IsNullOrWhiteSpace(message.Conversation.ChannelConnection.EncryptedAccessToken))
+            return Results.NotFound();
+        string fileId;
+        string telegramMediaType;
+        string? requestedName = null;
+        try
+        {
+            using var payload = JsonDocument.Parse(message.ProviderPayload);
+            var root = payload.RootElement;
+            var candidates = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
+            telegramMediaType = candidates.FirstOrDefault(name => root.TryGetProperty(name, out _)) ?? "";
+            if (string.IsNullOrEmpty(telegramMediaType) || !root.TryGetProperty(telegramMediaType, out var media))
+                return Results.NotFound();
+            JsonElement file;
+            if (media.ValueKind == JsonValueKind.Array)
+            {
+                if (media.GetArrayLength() == 0) return Results.NotFound();
+                file = media[media.GetArrayLength() - 1];
+            }
+            else file = media;
+            if (!file.TryGetProperty("file_id", out var idNode) ||
+                string.IsNullOrWhiteSpace(fileId = idNode.GetString() ?? "") || fileId.Length > 512)
+                return Results.NotFound();
+            if (file.TryGetProperty("file_name", out var nameNode)) requestedName = nameNode.GetString();
+        }
+        catch (JsonException) { return Results.Problem("اطلاعات رسانه تلگرام معتبر نیست.", statusCode: 422); }
+
+        string botToken;
+        try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(message.Conversation.ChannelConnection.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن ربات تلگرام قابل رمزگشایی نیست؛ اتصال را دوباره برقرار کنید." }); }
+        var telegramClient = clients.CreateClient("TelegramBotApi");
+        try
+        {
+            using var fileRequest = new HttpRequestMessage(HttpMethod.Get,
+                $"https://api.telegram.org/bot{botToken}/getFile?file_id={Uri.EscapeDataString(fileId)}");
+            using var fileResponse = await telegramClient.SendAsync(fileRequest, ct);
+            if (!fileResponse.IsSuccessStatusCode)
+                return Results.Problem("تلگرام اطلاعات فایل را در دسترس قرار نداد.", statusCode: 502);
+            using var fileJson = await JsonDocument.ParseAsync(await fileResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            if (!fileJson.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean() ||
+                !fileJson.RootElement.TryGetProperty("result", out var result) ||
+                !result.TryGetProperty("file_path", out var pathNode))
+                return Results.Problem("پاسخ getFile تلگرام معتبر نیست.", statusCode: 502);
+            var filePath = pathNode.GetString();
+            if (string.IsNullOrWhiteSpace(filePath) || filePath.Length > 1024 ||
+                filePath.Split('/').Any(part => part is "." or ".." || part.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-'))))
+                return Results.Problem("مسیر فایل برگشتی از تلگرام معتبر نیست.", statusCode: 502);
+            var encodedPath = string.Join("/", filePath.Split('/').Select(Uri.EscapeDataString));
+            using var downloadRequest = new HttpRequestMessage(HttpMethod.Get, $"https://api.telegram.org/file/bot{botToken}/{encodedPath}");
+            using var downloadResponse = await telegramClient.SendAsync(downloadRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!downloadResponse.IsSuccessStatusCode)
+                return Results.Problem("دریافت فایل از تلگرام ناموفق بود.", statusCode: 502);
+            const long maxTelegramFileSize = 20 * 1024 * 1024;
+            if (downloadResponse.Content.Headers.ContentLength is long length && length > maxTelegramFileSize)
+                return Results.Problem("اندازه فایل از سقف ۲۰ مگابایت دانلود Bot API بیشتر است.", statusCode: 413);
+            var extension = Path.GetExtension(filePath).ToLowerInvariant();
+            var mime = extension switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp",
+                ".gif" => "image/gif", ".mp4" => "video/mp4", ".3gp" => "video/3gpp",
+                ".mp3" => "audio/mpeg", ".m4a" => "audio/mp4", ".ogg" or ".oga" => "audio/ogg",
+                ".pdf" => "application/pdf", ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xls" => "application/vnd.ms-excel",
+                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                _ => null
+            };
+            if (mime is null) return Results.Problem("پسوند فایل تلگرام در فهرست مجاز دانلود نیست.", statusCode: 415);
+            await using var input = await downloadResponse.Content.ReadAsStreamAsync(ct);
+            await using var output = new MemoryStream();
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await input.ReadAsync(buffer, ct)) > 0)
+            {
+                if (output.Length + read > maxTelegramFileSize)
+                    return Results.Problem("اندازه فایل از سقف ۲۰ مگابایت بیشتر است.", statusCode: 413);
+                await output.WriteAsync(buffer.AsMemory(0, read), ct);
+            }
+            var fallbackName = $"{telegramMediaType}-{message.Id}{extension}";
+            var safeName = Path.GetFileName(string.IsNullOrWhiteSpace(requestedName) ? fallbackName : requestedName);
+            if (string.IsNullOrWhiteSpace(safeName) || safeName.Length > 180) safeName = fallbackName;
+            return Results.File(output.ToArray(), mime, safeName);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { return Results.Problem("دریافت رسانه تلگرام timeout شد.", statusCode: 504); }
+        catch (HttpRequestException)
+        { return Results.Problem("ارتباط با Telegram Bot API برای دریافت فایل برقرار نشد.", statusCode: 502); }
+    }
+
     if (message?.Conversation?.ChannelConnection?.Provider != "WhatsApp" ||
         string.IsNullOrWhiteSpace(message.ProviderPayload) ||
         string.IsNullOrWhiteSpace(message.Conversation.ChannelConnection.EncryptedAccessToken))
