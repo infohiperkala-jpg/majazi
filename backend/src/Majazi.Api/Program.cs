@@ -1110,7 +1110,7 @@ channelsApi.MapGet("/meta/connect", async (Guid organizationId, Guid? brandId, s
     var query = new Dictionary<string, string?>
     {
         ["client_id"] = appId, ["redirect_uri"] = redirectUri, ["response_type"] = "code",
-        ["scope"] = "instagram_business_basic,instagram_business_content_publish",
+        ["scope"] = "instagram_business_basic,instagram_business_manage_messages,instagram_business_content_publish",
         ["state"] = state
     };
     var authorizeUrl = QueryHelpers.AddQueryString("https://www.instagram.com/oauth/authorize", query);
@@ -1200,7 +1200,7 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
 });
 
 
-var channelProviders = new HashSet<string>(["Instagram", "Telegram", "WhatsApp"]);
+var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram", "WhatsApp"]);
 channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -1247,6 +1247,45 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
             HasCredential = item.EncryptedAccessToken != null, item.CreatedAt });
 });
+channelsApi.MapPost("/{connectionId:guid}/meta-webhook", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection,
+    IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
+        x => x.Id == connectionId && x.OrganizationId == organizationId && (x.Provider == "Instagram" || x.Provider == "Facebook"), ct);
+    if (item is null) return Results.NotFound();
+    if (item.Status != "Connected" || string.IsNullOrWhiteSpace(item.EncryptedAccessToken) ||
+        string.IsNullOrWhiteSpace(item.ExternalAccountId))
+        return Results.Conflict(new { error = "ابتدا حساب و توکن Meta را ثبت و با آزمون زنده تأیید کنید." });
+    string token;
+    try { token = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+    catch (CryptographicException) { return Results.Conflict(new { error = "توکن Meta قابل رمزگشایی نیست؛ اتصال را دوباره برقرار کنید." }); }
+    var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+    var host = item.Provider == "Instagram" ? "graph.instagram.com" : "graph.facebook.com";
+    var uri = $"https://{host}/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}/subscribed_apps";
+    using var message = new HttpRequestMessage(HttpMethod.Post, uri);
+    message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    message.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["subscribed_fields"] = "messages" });
+    try
+    {
+        using var response = await clients.CreateClient("MetaOAuth").SendAsync(message, ct);
+        using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        if (!response.IsSuccessStatusCode || !payload.RootElement.TryGetProperty("success", out var success) ||
+            success.ValueKind != JsonValueKind.True)
+            return Results.Problem("Meta اشتراک وب‌هوک پیام‌ها را نپذیرفت؛ مجوزهای messaging و دسترسی حساب را بررسی کنید.", statusCode: 502);
+        return Results.Ok(new { configured = true, provider = item.Provider, callbackUrl = (config["PublicBaseUrl"] ?? "").TrimEnd('/') + "/api/webhooks/meta" });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    { return Results.Problem("ثبت وب‌هوک Meta در زمان مقرر پاسخ نداد.", statusCode: 504); }
+    catch (HttpRequestException)
+    { return Results.Problem("ارتباط با Meta برای ثبت وب‌هوک برقرار نشد.", statusCode: 502); }
+});
+
 channelsApi.MapPost("/{connectionId:guid}/webhook", async (Guid organizationId, Guid connectionId,
     ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection, IHttpClientFactory clients,
     CancellationToken ct) =>
@@ -1379,6 +1418,12 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
         if (item.Provider == "Telegram") endpoint = $"https://api.telegram.org/bot{credential}/getMe";
         else if (item.Provider == "Instagram") endpoint = QueryHelpers.AddQueryString("https://graph.instagram.com/me",
             new Dictionary<string, string?> { ["fields"] = "id,user_id,username", ["access_token"] = credential });
+        else if (item.Provider == "Facebook")
+        {
+            if (string.IsNullOrWhiteSpace(item.ExternalAccountId)) return Results.Conflict(new { error = "برای Facebook باید شناسه صفحه ثبت شود." });
+            var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+            endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,name";
+        }
         else if (item.Provider == "WhatsApp")
         {
             if (string.IsNullOrWhiteSpace(item.ExternalAccountId)) return Results.Conflict(new { error = "برای WhatsApp باید Phone Number ID ثبت شود." });
@@ -1387,7 +1432,7 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
         }
         else return Results.Conflict(new { error = "برای این پلتفرم هنوز آداپتور رسمی بررسی سلامت پیاده‌سازی نشده است." });
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-        if (item.Provider == "WhatsApp") request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
+        if (item.Provider is "WhatsApp" or "Facebook") request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
         using var response = await clients.CreateClient(item.Provider == "Telegram" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
         using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = payload.RootElement;
@@ -1406,7 +1451,7 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
         }
         var result = root.TryGetProperty("result", out var telegramResult) ? telegramResult : root;
         if (result.TryGetProperty("id", out var externalId)) item.ExternalAccountId = externalId.ToString();
-        var accountName = result.TryGetProperty("username", out var username) ? username.GetString() : result.TryGetProperty("verified_name", out var verifiedName) ? verifiedName.GetString() : item.DisplayName;
+        var accountName = result.TryGetProperty("username", out var username) ? username.GetString() : result.TryGetProperty("name", out var pageName) ? pageName.GetString() : result.TryGetProperty("verified_name", out var verifiedName) ? verifiedName.GetString() : item.DisplayName;
         item.Status = "Connected";
         item.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -1588,6 +1633,132 @@ app.MapGet("/api/webhooks/whatsapp", (HttpRequest request, IConfiguration config
         !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(expected)))
         return Results.Unauthorized();
     return Results.Text(challenge, "text/plain");
+});
+
+// Shared Meta webhook endpoint for Instagram Messaging and Facebook Messenger.
+app.MapGet("/api/webhooks/meta", (HttpRequest request, IConfiguration config) =>
+{
+    var mode = request.Query["hub.mode"].ToString();
+    var token = request.Query["hub.verify_token"].ToString();
+    var challenge = request.Query["hub.challenge"].ToString();
+    var expected = config["Meta:WebhookVerifyToken"];
+    if (!string.Equals(mode, "subscribe", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(expected) ||
+        !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(expected)))
+        return Results.Unauthorized();
+    return Results.Text(challenge, "text/plain");
+});
+
+app.MapPost("/api/webhooks/meta", async (HttpRequest request, MajaziDbContext db, IConfiguration config, CancellationToken ct) =>
+{
+    var secret = config["Meta:AppSecret"];
+    if (string.IsNullOrWhiteSpace(secret)) return Results.Problem("Meta webhook signature validation is not configured.", statusCode: 503);
+    var supplied = request.Headers["X-Hub-Signature-256"].ToString();
+    if (!supplied.StartsWith("sha256=", StringComparison.Ordinal)) return Results.Unauthorized();
+    await using var stream = new MemoryStream();
+    await request.Body.CopyToAsync(stream, ct);
+    var raw = stream.ToArray();
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+    var expected = "sha256=" + Convert.ToHexString(hmac.ComputeHash(raw)).ToLowerInvariant();
+    var suppliedBytes = Encoding.UTF8.GetBytes(supplied);
+    var expectedBytes = Encoding.UTF8.GetBytes(expected);
+    if (suppliedBytes.Length != expectedBytes.Length || !CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes))
+        return Results.Unauthorized();
+
+    using var doc = JsonDocument.Parse(raw);
+    var root = doc.RootElement;
+    var objectName = root.TryGetProperty("object", out var obj) ? obj.GetString() : null;
+    var provider = objectName switch { "instagram" => "Instagram", "page" => "Facebook", _ => null };
+    if (provider is null) return Results.Ok(new { accepted = true, ignored = true });
+    if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+        return Results.Ok(new { accepted = true, ignored = true });
+
+    foreach (var entry in entries.EnumerateArray())
+    {
+        var accountId = entry.TryGetProperty("id", out var entryId) ? entryId.ToString() : null;
+        if (string.IsNullOrWhiteSpace(accountId)) continue;
+        var channel = await db.SocialChannelConnections.SingleOrDefaultAsync(
+            x => x.Provider == provider && x.ExternalAccountId == accountId && x.Status == "Connected", ct);
+        if (channel is null || !entry.TryGetProperty("messaging", out var events) || events.ValueKind != JsonValueKind.Array) continue;
+        foreach (var evt in events.EnumerateArray())
+        {
+            var senderId = evt.TryGetProperty("sender", out var sender) && sender.TryGetProperty("id", out var sid) ? sid.ToString() : null;
+            if (string.IsNullOrWhiteSpace(senderId)) continue;
+            if (evt.TryGetProperty("delivery", out var delivery) && delivery.TryGetProperty("mids", out var mids) && mids.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var mid in mids.EnumerateArray())
+                {
+                    var externalId = mid.ToString();
+                    var sent = await db.InboxMessages.Include(x => x.Conversation)
+                        .SingleOrDefaultAsync(x => x.ExternalMessageId == externalId && x.Direction == "Outbound" &&
+                            x.Conversation!.ChannelConnectionId == channel.Id, ct);
+                    if (sent is not null) sent.Status = "Delivered";
+                }
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+            if (evt.TryGetProperty("read", out var readEvent) && readEvent.TryGetProperty("watermark", out _))
+            {
+                // A read watermark is a provider timestamp; update only outbound messages in this conversation.
+                var conversationForRead = await db.InboxConversations.SingleOrDefaultAsync(
+                    x => x.ChannelConnectionId == channel.Id && x.ExternalConversationId == senderId, ct);
+                if (conversationForRead is not null)
+                {
+                    var watermark = readEvent.GetProperty("watermark").GetInt64();
+                    var readAt = DateTimeOffset.FromUnixTimeMilliseconds(watermark);
+                    var outgoing = await db.InboxMessages.Where(x => x.ConversationId == conversationForRead.Id &&
+                        x.Direction == "Outbound" && x.CreatedAt <= readAt && (x.Status == "Sent" || x.Status == "Delivered")).ToListAsync(ct);
+                    foreach (var sent in outgoing) sent.Status = "Read";
+                    await db.SaveChangesAsync(ct);
+                }
+                continue;
+            }
+            if (!evt.TryGetProperty("message", out var incoming)) continue;
+            if (incoming.TryGetProperty("is_echo", out var echo) && echo.ValueKind == JsonValueKind.True) continue;
+            var externalMessageId = incoming.TryGetProperty("mid", out var midElement) ? midElement.GetString() : null;
+            if (string.IsNullOrWhiteSpace(externalMessageId)) continue;
+            var messageText = incoming.TryGetProperty("text", out var textElement) ? textElement.GetString() : null;
+            var attachmentSummary = incoming.TryGetProperty("attachments", out var attachments) && attachments.ValueKind == JsonValueKind.Array
+                ? string.Join("، ", attachments.EnumerateArray().Select(a => a.TryGetProperty("type", out var t) ? t.GetString() : "رسانه"))
+                : null;
+            var body = !string.IsNullOrWhiteSpace(messageText) ? messageText :
+                !string.IsNullOrWhiteSpace(attachmentSummary) ? $"[پیوست {provider}: {attachmentSummary}]" : "[پیام بدون متن]";
+            if (body.Length > 10000) body = body[..10000];
+
+            var conversation = await db.InboxConversations.SingleOrDefaultAsync(
+                x => x.ChannelConnectionId == channel.Id && x.ExternalConversationId == senderId, ct);
+            if (conversation is null)
+            {
+                conversation = new InboxConversation
+                {
+                    OrganizationId = channel.OrganizationId, ChannelConnectionId = channel.Id,
+                    ExternalConversationId = senderId, Subject = $"{provider} {senderId}", Status = "Open"
+                };
+                db.InboxConversations.Add(conversation);
+                await db.SaveChangesAsync(ct);
+            }
+            if (await db.InboxMessages.AnyAsync(x => x.ConversationId == conversation.Id &&
+                x.ExternalMessageId == externalMessageId, ct)) continue;
+            var receivedAt = DateTimeOffset.UtcNow;
+            if (evt.TryGetProperty("timestamp", out var timestamp) && timestamp.TryGetInt64(out var ms))
+            {
+                try { receivedAt = DateTimeOffset.FromUnixTimeMilliseconds(ms); } catch (ArgumentOutOfRangeException) { }
+            }
+            var inboxMessage = new InboxMessage
+            {
+                ConversationId = conversation.Id, ExternalMessageId = externalMessageId,
+                Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt,
+                ProviderPayload = JsonSerializer.Serialize(evt)
+            };
+            db.InboxMessages.Add(inboxMessage);
+            await QueueAutomationRunsAsync(db, channel.OrganizationId, "InboxMessageReceived", "InboxMessage",
+                inboxMessage.Id, new { messageBody = body, conversationSubject = conversation.Subject, channel = provider }, ct);
+            conversation.LastMessageAt = receivedAt;
+            conversation.UpdatedAt = DateTimeOffset.UtcNow;
+            if (conversation.Status.Equals("resolved", StringComparison.OrdinalIgnoreCase)) conversation.Status = "open";
+            await db.SaveChangesAsync(ct);
+        }
+    }
+    return Results.Ok(new { accepted = true });
 });
 
 app.MapPost("/api/webhooks/whatsapp", async (HttpRequest request, MajaziDbContext db,
@@ -3116,6 +3287,46 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return Results.Problem("ارسال WhatsApp timeout شد؛ وضعیت تحویل را در Meta بررسی کنید.", statusCode: 504); }
         catch (HttpRequestException) { return Results.Problem("ارتباط با WhatsApp Cloud API برقرار نشد.", statusCode: 502); }
     }
+    // Instagram Messaging and Facebook Messenger Send API.
+    else if (conversation.ChannelConnection?.Provider is "Instagram" or "Facebook")
+    {
+        var channel = conversation.ChannelConnection;
+        if (channel.Status != "Connected" || string.IsNullOrWhiteSpace(channel.EncryptedAccessToken) ||
+            string.IsNullOrWhiteSpace(channel.ExternalAccountId))
+            return Results.Conflict(new { error = "اتصال Meta باید با شناسه حساب و توکن معتبر تأیید شده باشد." });
+        var recipientId = conversation.ExternalConversationId;
+        if (string.IsNullOrWhiteSpace(recipientId) || recipientId.Length > 180 ||
+            recipientId.Any(char.IsWhiteSpace))
+            return Results.Conflict(new { error = "شناسه گیرنده معتبر نیست؛ مکالمه باید از وب‌هوک رسمی Meta دریافت شده باشد." });
+        string tokenValue;
+        try { tokenValue = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن Meta قابل رمزگشایی نیست؛ اتصال را دوباره برقرار کنید." }); }
+        var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+        var host = channel.Provider == "Instagram" ? "graph.instagram.com" : "graph.facebook.com";
+        try
+        {
+            using var outbound = new HttpRequestMessage(HttpMethod.Post,
+                $"https://{host}/{version}/{Uri.EscapeDataString(channel.ExternalAccountId)}/messages");
+            outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenValue);
+            outbound.Content = JsonContent.Create(new { recipient = new { id = recipientId }, message = new { text = body } });
+            using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
+            using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            if (!response.IsSuccessStatusCode)
+                return Results.Problem(channel.Provider == "Instagram"
+                    ? "Instagram Messaging API پیام را نپذیرفت؛ مجوز instagram_business_manage_messages و پنجره مجاز پاسخ را بررسی کنید."
+                    : "Messenger Send API پیام را نپذیرفت؛ مجوز pages_messaging و پنجره مجاز پاسخ را بررسی کنید.", statusCode: 502);
+            if (payload.RootElement.TryGetProperty("message_id", out var messageId))
+                message.ExternalMessageId = messageId.GetString();
+            else if (payload.RootElement.TryGetProperty("id", out var id))
+                message.ExternalMessageId = id.GetString();
+            message.Status = "Sent";
+            message.SentAt = DateTimeOffset.UtcNow;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { return Results.Problem("ارسال پیام از طریق Meta در زمان مقرر پاسخ نداد.", statusCode: 504); }
+        catch (HttpRequestException)
+        { return Results.Problem("ارتباط با Meta Messaging API برقرار نشد؛ پیام در سامانه ثبت نشد.", statusCode: 502); }
+    }
     // Telegram replies are delivered synchronously through the official Bot API.
     // Providers without a delivery adapter remain explicitly queued.
     else if (conversation.ChannelConnection?.Provider == "Telegram")
@@ -3173,7 +3384,7 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         new { message.Id, message.Direction, message.Body, message.Status, message.ExternalMessageId,
             message.SentAt, message.CreatedAt,
             deliveryNote = delivered
-                ? "پیام با موفقیت از طریق Telegram Bot API ارسال شد."
+                ? $"پیام با موفقیت از طریق {conversation.ChannelConnection?.Provider} API ارسال شد."
                 : "پیام فقط در صف داخلی ثبت شد؛ ارسال‌گر رسمی این کانال هنوز فعال نیست." });
 });
 

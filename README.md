@@ -17,6 +17,13 @@
 
 برای سرویس‌های خارجی، مسیر خروجی HTTP(S) جداگانه و اختیاری قابل تنظیم است: `NETWORK_INTERNATIONAL_DEFAULT_PROXY` یا پراکسی اختصاصی `NETWORK_TELEGRAM_PROXY`، `NETWORK_META_PROXY` و `NETWORK_AI_PROXY`. این تنظیم فقط به کلاینت‌های خارجی مربوط است؛ سرویس‌های ایرانی باید با مسیر مستقیم و بدون پراکسی خارجی پیاده‌سازی شوند. این قابلیت VPN نصب نمی‌کند و به پراکسی/VPN قابل‌دسترسی از داخل کانتینر API نیاز دارد. اطلاعات محرمانه پراکسی را در `.env` سرور نگه دارید و در Git یا گفتگو ارسال نکنید.\n\nAPI هنگام راه‌اندازی، Migrationهای EF Core را روی PostgreSQL اعمال می‌کند. ثبت‌نام اولیه با ایمیل، گذرواژه قوی و نام سازمان انجام می‌شود؛ کاربر ثبت‌نام‌کننده مالک سازمان خواهد بود. ورود با ایمیل و گذرواژه، JWT یک‌ساعته صادر می‌کند. دسترسی به اطلاعات سازمان و CRM بر اساس عضویت همان سازمان کنترل می‌شود.
 
+## Instagram Messaging and Facebook Messenger
+- Instagram Business Login requests `instagram_business_manage_messages` in addition to the existing account/content scopes. The account must be eligible for Instagram Messaging and the Meta app must have the required access/review for production users.
+- Facebook Messenger is connected by registering the Facebook Page ID and its Page Access Token with `pages_messaging` permission. Use a Page token for a Page where the app has messaging task access; do not use a user token.
+- Shared callback: `https://YOUR_PUBLIC_DOMAIN/api/webhooks/meta`; configure the Meta Webhooks product for the `instagram` and `page` objects and subscribe to `messages`. Verify token and App Secret are the same server-side values used for WhatsApp webhooks.
+- After connecting each Instagram account or Facebook Page, use its **Activate Meta webhook** action in Channels to subscribe that account/page to message events. Replies are sent through the corresponding official Meta Send API. Messaging windows, app review, recipient consent, and Meta platform policies still apply.
+
+
 ## WhatsApp Business webhook
 برای دریافت رویدادهای WhatsApp Cloud API، دامنه عمومی باید HTTPS و در دسترس Meta باشد. این متغیرها را فقط در Secretهای محیط اجرای API (نه در Git و نه در مرورگر) تنظیم کنید:
 
