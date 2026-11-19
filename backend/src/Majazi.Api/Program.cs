@@ -290,6 +290,24 @@ organizationsApi.MapPost("/{id:guid}/members", async (Guid id, AddMemberRequest 
     return Results.Created($"/api/organizations/{id}/members", new { userId = target.Id, email = target.Email, role });
 });
 
+organizationsApi.MapPut("/{id:guid}/members/{memberId:guid}", async (Guid id, Guid memberId, UpdateMemberRoleRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var actor = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == id, ct);
+    if (actor is null) return Results.NotFound();
+    if (actor.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var target = await db.OrganizationMemberships.Include(x => x.User).SingleOrDefaultAsync(x => x.UserId == memberId && x.OrganizationId == id, ct);
+    if (target is null) return Results.NotFound();
+    var role = request.Role?.Trim();
+    if (role is not ("Admin" or "Member")) return Results.BadRequest(new { error = "نقش باید مدیر یا عضو باشد." });
+    if (target.Role == "Owner" || (actor.Role != "Owner" && target.Role == "Admin")) return Results.Forbid();
+    if (memberId == userId.Value && role != actor.Role) return Results.BadRequest(new { error = "امکان تغییر نقش خودتان وجود ندارد." });
+    target.Role = role;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { userId = target.UserId, email = target.User!.Email, target.Role, target.CreatedAt });
+});
+
 organizationsApi.MapDelete("/{id:guid}/members/{memberId:guid}", async (Guid id, Guid memberId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -1150,6 +1168,62 @@ dashboardApi.MapGet("/summary", async (Guid organizationId, ClaimsPrincipal prin
         clicks = campaignTotals?.Clicks ?? 0L,
         conversions = campaignTotals?.Conversions ?? 0L,
         updatedAt = DateTimeOffset.UtcNow
+    });
+});
+
+
+dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from, DateTimeOffset? to, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var start = (from ?? DateTimeOffset.UtcNow.AddDays(-29)).ToUniversalTime();
+    var end = (to ?? DateTimeOffset.UtcNow).ToUniversalTime();
+    if (end < start || (end - start).TotalDays > 366) return Results.BadRequest(new { error = "بازه گزارش نامعتبر است؛ حداکثر بازه ۳۶۶ روز است." });
+    var endExclusive = end.AddDays(1);
+    var contacts = await db.CrmContacts.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.CreatedAt }).ToListAsync(ct);
+    var leads = await db.CrmLeads.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.CreatedAt, x.Stage, x.EstimatedValue }).ToListAsync(ct);
+    var activities = await db.CrmActivities.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.OccurredAt >= start && x.OccurredAt < endExclusive)
+        .Select(x => new { x.OccurredAt, x.ActivityType }).ToListAsync(ct);
+    var campaigns = await db.MarketingCampaigns.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.CreatedAt, x.Status, x.Budget, x.ActualSpend, x.AttributedRevenue, x.Impressions, x.Clicks, x.Conversions }).ToListAsync(ct);
+    var drafts = await db.ContentDrafts.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.CreatedAt, x.Status, x.Channel }).ToListAsync(ct);
+    var messages = await db.InboxMessages.AsNoTracking().Where(x => x.Conversation!.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.CreatedAt, x.Direction, x.Status }).ToListAsync(ct);
+    var daily = Enumerable.Range(0, (int)Math.Min(367, Math.Floor((end.Date - start.Date).TotalDays) + 1))
+        .Select(offset => start.Date.AddDays(offset))
+        .Select(day => new
+        {
+            date = day.ToString("yyyy-MM-dd"),
+            contacts = contacts.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
+            leads = leads.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
+            activities = activities.Count(x => x.OccurredAt.UtcDateTime.Date == day.UtcDateTime.Date),
+            campaigns = campaigns.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
+            contentDrafts = drafts.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
+            messages = messages.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date)
+        }).ToArray();
+    return Results.Ok(new
+    {
+        from = start, to = end,
+        totals = new
+        {
+            contacts = contacts.Count, leads = leads.Count, activities = activities.Count,
+            campaigns = campaigns.Count, contentDrafts = drafts.Count, messages = messages.Count,
+            inboundMessages = messages.Count(x => x.Direction == "Inbound"),
+            outboundMessages = messages.Count(x => x.Direction == "Outbound"),
+            estimatedPipeline = leads.Where(x => x.Stage != "Lost" && x.Stage != "Won").Sum(x => x.EstimatedValue ?? 0m),
+            wonValue = leads.Where(x => x.Stage == "Won").Sum(x => x.EstimatedValue ?? 0m),
+            budget = campaigns.Sum(x => x.Budget), spend = campaigns.Sum(x => x.ActualSpend),
+            attributedRevenue = campaigns.Sum(x => x.AttributedRevenue),
+            impressions = campaigns.Sum(x => x.Impressions), clicks = campaigns.Sum(x => x.Clicks),
+            conversions = campaigns.Sum(x => x.Conversions)
+        },
+        leadStages = leads.GroupBy(x => x.Stage).Select(g => new { key = g.Key, count = g.Count(), value = g.Sum(x => x.EstimatedValue ?? 0m) }).OrderByDescending(x => x.count),
+        campaignStatuses = campaigns.GroupBy(x => x.Status).Select(g => new { key = g.Key, count = g.Count() }).OrderByDescending(x => x.count),
+        contentStatuses = drafts.GroupBy(x => x.Status).Select(g => new { key = g.Key, count = g.Count() }).OrderByDescending(x => x.count),
+        daily
     });
 });
 
@@ -2094,6 +2168,7 @@ public sealed record StatusDefinitionRequest(string? Module, string? Key, string
 public sealed record UpdateStatusDefinitionRequest(string? Label, string? Color, string? Description, int SortOrder, bool IsActive);
 public sealed record CreateBrandRequest(string? Name, string? Slug);
 public sealed record AddMemberRequest(string? Email, string? Role);
+public sealed record UpdateMemberRoleRequest(string? Role);
 public sealed record CrmContactRequest(Guid? BrandId, string? FullName, string? Email, string? Phone, string? Company, string? Notes);
 public sealed record CrmLeadRequest(Guid? BrandId, Guid? ContactId, string? Title, string? Stage, decimal? EstimatedValue, string? Source, string? Notes);
 public sealed record UpdateLeadStageRequest(string? Stage);
