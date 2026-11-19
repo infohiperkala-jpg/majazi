@@ -175,6 +175,25 @@ app.MapGet("/api/auth/me", async (ClaimsPrincipal principal, MajaziDbContext db,
 
 var organizationsApi = app.MapGroup("/api/organizations").RequireAuthorization();
 
+organizationsApi.MapPost("/demo/digibail", async (ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    try
+    {
+        var result = await DemoDataSeeder.SeedAsync(db, userId.Value, ct);
+        return Results.Ok(result);
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.Forbid();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
+});
+
 organizationsApi.MapGet("/", async (ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
