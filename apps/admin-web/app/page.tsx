@@ -278,6 +278,7 @@ export default function Home() {
       <a className="nav" href="#modules"><span>۴.</span> استودیوی تولید محتوا</a>
       <a className="nav" href="#modules"><span>۵.</span> تقویم محتوایی</a>
       <a className="nav" href="#channels"><span>۶.</span> مدیریت شبکه‌های اجتماعی</a>
+      <a className="nav" href="/growth"><span>۷.</span> مرکز رشد چندسکویی و افزایش فروش</a>
       <a className="nav" href="#modules"><span>۷.</span> مدیریت کمپین‌های تبلیغاتی</a>
       <a className="nav" href="#modules"><span>۸.</span> مرکز پیام‌ها و مکالمات</a>
       <a className="nav" href="#modules"><span>۹.</span> مرکز تماس هوشمند</a>
