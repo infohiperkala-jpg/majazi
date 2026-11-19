@@ -11,8 +11,28 @@ permissions:
 
 jobs:
   backend:
-    name: Backend build
+    name: Backend build and PostgreSQL migration smoke
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: majazi_ci
+          POSTGRES_USER: majazi
+          POSTGRES_PASSWORD: majazi_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U majazi -d majazi_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      ConnectionStrings__Default: Host=localhost;Port=5432;Database=majazi_ci;Username=majazi;Password=majazi_ci_password
+      Jwt__SigningKey: majazi-ci-only-signing-key-not-for-production-2026
+      Jwt__Issuer: majazi-api
+      Jwt__Audience: majazi-web
+      ASPNETCORE_URLS: http://127.0.0.1:5080
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -22,6 +42,58 @@ jobs:
         run: dotnet restore backend/src/Majazi.Api/Majazi.Api.csproj
       - name: Build
         run: dotnet build backend/src/Majazi.Api/Majazi.Api.csproj --configuration Release --no-restore
+      - name: Diagnose EF model snapshot drift (isolated copy)
+        shell: bash
+        run: |
+          set -u
+          dotnet tool install --global dotnet-ef --version 10.0.0
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          diagnostic_project="$RUNNER_TEMP/majazi-ef-diagnostic"
+          mkdir -p "$diagnostic_project"
+          cp -a backend/src/Majazi.Api/. "$diagnostic_project/"
+          set +e
+          dotnet ef migrations add CiModelDriftDiagnostic \
+            --project "$diagnostic_project/Majazi.Api.csproj" \
+            --startup-project "$diagnostic_project/Majazi.Api.csproj" \
+            --output-dir Migrations/Diagnostics \
+            > "$RUNNER_TEMP/majazi-ef-diagnostic.log" 2>&1
+          diagnostic_status=$?
+          set -e
+          echo "dotnet-ef diagnostic exit code: $diagnostic_status"
+          cat "$RUNNER_TEMP/majazi-ef-diagnostic.log"
+          while IFS= read -r file; do
+            echo "===== DIAGNOSTIC: $file ====="
+            cat "$file"
+          done < <(find "$diagnostic_project/Migrations/Diagnostics" -maxdepth 1 -type f -name '*.cs' -print 2>/dev/null | sort)
+      - name: Smoke test API startup and all EF migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/majazi-data-protection"
+          export DataProtection__KeysPath="$RUNNER_TEMP/majazi-data-protection"
+          dotnet run --project backend/src/Majazi.Api/Majazi.Api.csproj --configuration Release --no-build > "$RUNNER_TEMP/majazi-api.log" 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill "$api_pid" 2>/dev/null || true
+            wait "$api_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:5080/health >/dev/null; then
+              echo "API is healthy; startup migrations completed."
+              exit 0
+            fi
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/majazi-api.log"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          cat "$RUNNER_TEMP/majazi-api.log"
+          echo "API did not become healthy within 120 seconds."
+          exit 1
 
   frontend:
     name: Frontend build
