@@ -287,6 +287,12 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.ToTable("crm_activities", (string)null);
         });
 
+        modelBuilder.Entity("Majazi.Api.Models.ContentApprovalRecord", b =>
+        {
+            b.HasOne("Majazi.Api.Models.ContentDraft", null).WithMany().HasForeignKey("DraftId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
         {
             b.HasOne("Majazi.Api.Models.Brand", null).WithMany().HasForeignKey("BrandId").OnDelete(DeleteBehavior.SetNull);
