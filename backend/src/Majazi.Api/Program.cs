@@ -1507,6 +1507,17 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
         .Select(x => new { x.CreatedAt, x.Status, x.Channel }).ToListAsync(ct);
     var messages = await db.InboxMessages.AsNoTracking().Where(x => x.Conversation!.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
         .Select(x => new { x.CreatedAt, x.Direction, x.Status }).ToListAsync(ct);
+    var orderRows = await db.SalesOrders.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.Id, x.CreatedAt, x.Status, x.Currency, x.Total }).ToListAsync(ct);
+    var orderIds = orderRows.Select(x => x.Id).ToArray();
+    var orderPayments = orderIds.Length == 0 ? [] : await db.PaymentTransactions.AsNoTracking()
+        .Where(x => orderIds.Contains(x.OrderId) && x.CreatedAt >= start && x.CreatedAt < endExclusive)
+        .Select(x => new { x.OrderId, x.Amount, x.Status }).ToListAsync(ct);
+    var paidByOrder = orderPayments.Where(x => x.Status == "Paid").GroupBy(x => x.OrderId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+    var refundedByOrder = orderPayments.Where(x => x.Status == "Refunded").GroupBy(x => x.OrderId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+    var paidTotal = paidByOrder.Values.Sum();
+    var refundedTotal = refundedByOrder.Values.Sum();
+    var outstandingTotal = orderRows.Sum(x => Math.Max(0, x.Total - (paidByOrder.GetValueOrDefault(x.Id)) + refundedByOrder.GetValueOrDefault(x.Id)));
     var daily = Enumerable.Range(0, (int)Math.Min(367, Math.Floor((end.Date - start.Date).TotalDays) + 1))
         .Select(offset => start.Date.AddDays(offset))
         .Select(day => new
@@ -1517,7 +1528,8 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
             activities = activities.Count(x => x.OccurredAt.UtcDateTime.Date == day.Date),
             campaigns = campaigns.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
             contentDrafts = drafts.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
-            messages = messages.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date)
+            messages = messages.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
+            orders = orderRows.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date)
         }).ToArray();
     return Results.Ok(new
     {
@@ -1533,7 +1545,17 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
             budget = campaigns.Sum(x => x.Budget), spend = campaigns.Sum(x => x.ActualSpend),
             attributedRevenue = campaigns.Sum(x => x.AttributedRevenue),
             impressions = campaigns.Sum(x => x.Impressions), clicks = campaigns.Sum(x => x.Clicks),
-            conversions = campaigns.Sum(x => x.Conversions)
+            conversions = campaigns.Sum(x => x.Conversions),
+            orders = orderRows.Count,
+            draftOrders = orderRows.Count(x => x.Status == "Draft"),
+            confirmedOrders = orderRows.Count(x => x.Status == "Confirmed"),
+            processingOrders = orderRows.Count(x => x.Status == "Processing"),
+            completedOrders = orderRows.Count(x => x.Status == "Completed"),
+            cancelledOrders = orderRows.Count(x => x.Status == "Cancelled"),
+            orderValue = orderRows.Sum(x => x.Total),
+            paidAmount = paidTotal,
+            refundedAmount = refundedTotal,
+            outstandingBalance = outstandingTotal
         },
         leadStages = leads.GroupBy(x => x.Stage).Select(g => new { key = g.Key, count = g.Count(), value = g.Sum(x => x.EstimatedValue ?? 0m) }).OrderByDescending(x => x.count),
         campaignStatuses = campaigns.GroupBy(x => x.Status).Select(g => new { key = g.Key, count = g.Count() }).OrderByDescending(x => x.count),
