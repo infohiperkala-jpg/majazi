@@ -16,6 +16,8 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<SocialChannelConnection> SocialChannelConnections => Set<SocialChannelConnection>();
     public DbSet<InboxConversation> InboxConversations => Set<InboxConversation>();
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+    public DbSet<ContentDraft> ContentDrafts => Set<ContentDraft>();
+    public DbSet<ContentDraftVersion> ContentDraftVersions => Set<ContentDraftVersion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -129,6 +131,30 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.HasIndex(x => new { x.ConversationId, x.CreatedAt });
             e.HasIndex(x => new { x.ConversationId, x.ExternalMessageId }).IsUnique();
             e.HasOne(x => x.Conversation).WithMany(x => x.Messages).HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContentDraft>(e =>
+        {
+            e.ToTable("content_drafts"); e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(240).IsRequired();
+            e.Property(x => x.Content).HasMaxLength(30000).IsRequired();
+            e.Property(x => x.Channel).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Tone).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            e.Property(x => x.Prompt).HasMaxLength(4000);
+            e.Property(x => x.AiModel).HasMaxLength(120);
+            e.HasIndex(x => new { x.OrganizationId, x.Status, x.UpdatedAt });
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Brand>().WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(x => x.Versions).WithOne(x => x.Draft).HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ContentDraftVersion>(e =>
+        {
+            e.ToTable("content_draft_versions"); e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(240).IsRequired();
+            e.Property(x => x.Content).HasMaxLength(30000).IsRequired();
+            e.Property(x => x.ChangeNote).HasMaxLength(300).IsRequired();
+            e.HasIndex(x => new { x.DraftId, x.VersionNumber }).IsUnique();
         });
 
         modelBuilder.Entity<CrmActivity>(e =>
