@@ -203,3 +203,15 @@ public sealed class ContentDraftVersion
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public ContentDraft? Draft { get; set; }
 }
+
+public sealed class ContentApprovalRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid DraftId { get; set; }
+    public Guid OrganizationId { get; set; }
+    public int StageNumber { get; set; }
+    public string Decision { get; set; } = "Approved";
+    public string? Comment { get; set; }
+    public Guid ActorUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
