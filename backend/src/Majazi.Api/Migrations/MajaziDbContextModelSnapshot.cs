@@ -315,11 +315,6 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Navigation("Conversation");
         });
 
-        modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
-        {
-            b.Navigation("Messages");
-        });
-
         modelBuilder.Entity("Majazi.Api.Models.CrmContact", b =>
         {
             b.HasOne("Majazi.Api.Models.Brand", "Brand").WithMany().HasForeignKey("BrandId").OnDelete(DeleteBehavior.SetNull);
