@@ -3096,10 +3096,87 @@ contentApi.MapGet("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
     var draft = await db.ContentDrafts.AsNoTracking()
         .Where(x => x.Id == draftId && x.OrganizationId == organizationId)
         .Select(x => new { x.Id, x.BrandId, x.Title, x.Content, x.Channel, x.Tone, x.Status, x.Prompt, x.AiModel,
-            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, x.ScheduledAt, x.PublishedAt, x.PublishError, Versions = x.Versions.OrderByDescending(v => v.VersionNumber)
+            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, x.ScheduledAt, x.PublishedAt, x.PublishError,
+            Attachments = db.ContentDraftAttachments.Where(a => a.DraftId == x.Id)
+                .Select(a => new { a.Id, a.FileName, a.ContentType, a.Size, a.CreatedAt }).ToList(),
+            Versions = x.Versions.OrderByDescending(v => v.VersionNumber)
                 .Select(v => new { v.Id, v.VersionNumber, v.Title, v.Content, v.ChangeNote, v.CreatedAt }).ToList() })
         .SingleOrDefaultAsync(ct);
     return draft is null ? Results.NotFound() : Results.Ok(draft);
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/attachment", async (Guid organizationId, Guid draftId,
+    IFormFile file, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    if (file is null || file.Length is <= 0 or > 25 * 1024 * 1024)
+        return Results.BadRequest(new { error = "فایل باید بین ۱ بایت تا ۲۵ مگابایت باشد." });
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (draft.Channel != "Eitaa")
+        return Results.BadRequest(new { error = "پیوست رسانه‌ای این نسخه فقط برای انتشار ایتا فعال است." });
+    if (draft.Status is "Scheduled" or "Publishing" or "Published")
+        return Results.Conflict(new { error = "برای تغییر پیوست، ابتدا زمان‌بندی را لغو کنید؛ محتوای منتشرشده قابل تغییر نیست." });
+    var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4",
+        "audio/mpeg", "audio/mp4", "audio/ogg", "application/pdf",
+        "application/zip", "application/octet-stream"
+    };
+    var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType.Split(';')[0].Trim();
+    if (!allowedTypes.Contains(contentType))
+        return Results.BadRequest(new { error = "نوع فایل پشتیبانی نمی‌شود. تصویر، ویدئو، صوت، PDF یا فایل فشرده انتخاب کنید." });
+    var fileName = Path.GetFileName(file.FileName);
+    if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 255)
+        return Results.BadRequest(new { error = "نام فایل معتبر نیست." });
+    await using var stream = new MemoryStream((int)file.Length);
+    await file.CopyToAsync(stream, ct);
+    var attachment = await db.ContentDraftAttachments.SingleOrDefaultAsync(x => x.DraftId == draftId, ct);
+    if (attachment is null)
+    {
+        attachment = new ContentDraftAttachment { DraftId = draftId };
+        db.ContentDraftAttachments.Add(attachment);
+    }
+    attachment.FileName = fileName;
+    attachment.ContentType = contentType;
+    attachment.Size = file.Length;
+    attachment.Data = stream.ToArray();
+    attachment.CreatedAt = DateTimeOffset.UtcNow;
+    if (draft.Status is "InReview" or "Approved" or "PublishFailed")
+    {
+        draft.Status = "Draft";
+        draft.ApprovalRound++;
+        draft.ApprovedAt = null;
+        draft.ApprovedByUserId = null;
+    }
+    draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { attachment.Id, attachment.FileName, attachment.ContentType, attachment.Size, attachment.CreatedAt });
+}).DisableAntiforgery();
+
+contentApi.MapDelete("/drafts/{draftId:guid}/attachment", async (Guid organizationId, Guid draftId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (draft.Status is "Scheduled" or "Publishing" or "Published")
+        return Results.Conflict(new { error = "برای حذف پیوست، ابتدا زمان‌بندی را لغو کنید." });
+    var attachment = await db.ContentDraftAttachments.SingleOrDefaultAsync(x => x.DraftId == draftId, ct);
+    if (attachment is null) return Results.NotFound();
+    db.ContentDraftAttachments.Remove(attachment);
+    if (draft.Status is "InReview" or "Approved" or "PublishFailed")
+    {
+        draft.Status = "Draft";
+        draft.ApprovalRound++;
+        draft.ApprovedAt = null;
+        draft.ApprovedByUserId = null;
+    }
+    draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
 });
 
 contentApi.MapPut("/drafts/{draftId:guid}", async (Guid organizationId, Guid draftId,

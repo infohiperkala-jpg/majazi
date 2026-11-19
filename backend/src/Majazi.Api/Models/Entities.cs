@@ -194,6 +194,17 @@ public sealed class ContentDraft
     public ICollection<ContentDraftVersion> Versions { get; set; } = new List<ContentDraftVersion>();
 }
 
+public sealed class ContentDraftAttachment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid DraftId { get; set; }
+    public string FileName { get; set; } = "";
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long Size { get; set; }
+    public byte[] Data { get; set; } = [];
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class ContentDraftVersion
 {
     public Guid Id { get; set; } = Guid.NewGuid();

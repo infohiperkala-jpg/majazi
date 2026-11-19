@@ -18,6 +18,7 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
     public DbSet<ContentDraft> ContentDrafts => Set<ContentDraft>();
     public DbSet<ContentDraftVersion> ContentDraftVersions => Set<ContentDraftVersion>();
+    public DbSet<ContentDraftAttachment> ContentDraftAttachments => Set<ContentDraftAttachment>();
     public DbSet<ContentApprovalRecord> ContentApprovalRecords => Set<ContentApprovalRecord>();
     public DbSet<StatusDefinition> StatusDefinitions => Set<StatusDefinition>();
     public DbSet<TextTemplate> TextTemplates => Set<TextTemplate>();
@@ -33,6 +34,16 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ContentDraftAttachment>(e =>
+        {
+            e.ToTable("content_draft_attachments"); e.HasKey(x => x.Id);
+            e.Property(x => x.FileName).HasMaxLength(255).IsRequired();
+            e.Property(x => x.ContentType).HasMaxLength(160).IsRequired();
+            e.Property(x => x.Data).HasColumnType("bytea").IsRequired();
+            e.HasIndex(x => x.DraftId).IsUnique();
+            e.HasOne<ContentDraft>().WithMany().HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<AutomationRun>(e =>
         {
             e.Property(x => x.EventKey).HasMaxLength(128);

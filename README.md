@@ -29,7 +29,8 @@
 - Register an EitaaYar API token (not an assumed native Eitaa bot token) as the channel credential. The adapter validates it with `getMe` and publishes approved text drafts using `sendMessage` at `https://eitaayar.ir/api/{TOKEN}/{METHOD}`.
 - Publishing uses `application/x-www-form-urlencoded` with `chat_id` and `text`. The destination may be a numeric chat/channel ID or a supported username. The destination must already be available to the EitaaYar account and authorized for delivery.
 - EitaaYar credentials are encrypted at rest. The token is embedded in the provider URL by the documented API; do not enable request-URI logging for this client.
-- This integration is outbound-only. No inbound webhook or Eitaa inbox sync is claimed. File/media sending is not enabled until its upload contract is verified.
+- This integration is outbound-only. No inbound webhook or Eitaa inbox sync is claimed.
+- The content editor supports one persisted media attachment per Eitaa draft (up to 25 MiB). The worker sends it as multipart `file` plus `caption` through the documented `sendFile` method; text-only drafts continue to use `sendMessage`. The PDF's method index labels item 3 as `sendDocument` while its detailed section names it `sendFile`; the implementation follows the detailed upload section and should be verified against the account's live test API before production use.
 
 ## Instagram Messaging and Facebook Messenger
 - Instagram Business Login requests `instagram_business_manage_messages` in addition to the existing account/content scopes. The account must be eligible for Instagram Messaging and the Meta app must have the required access/review for production users.

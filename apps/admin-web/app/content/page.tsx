@@ -6,7 +6,8 @@ import "./content.css";
 
 type Organization={id:string;name:string;role:string};
 type Brand={id:string;name:string};
-type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[]};
+type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[];attachments?:ContentAttachment[]};
+type ContentAttachment={id:string;fileName:string;contentType:string;size:number;createdAt:string};
 type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
 type Approval={id:string;reviewRound:number;stageNumber:number;decision:string;comment?:string|null;actorUserId:string;createdAt:string};
 type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
@@ -26,7 +27,7 @@ export default function ContentStudioPage(){
  const [detail,setDetail]=useState<Draft|null>(null);const [approvals,setApprovals]=useState<Approval[]>([]);const [approvalComment,setApprovalComment]=useState("");const [ai,setAi]=useState<AIStatus|null>(null);const [targets,setTargets]=useState<PublishTarget[]>([]);const [connectionId,setConnectionId]=useState("");const [targetChatId,setTargetChatId]=useState("");const [scheduledAt,setScheduledAt]=useState("");
  const [topic,setTopic]=useState("");const [manualTitle,setManualTitle]=useState("");const [manualContent,setManualContent]=useState("");const [createMode,setCreateMode]=useState<"ai"|"manual">("ai");const [brandId,setBrandId]=useState("");const [channel,setChannel]=useState("Instagram");const [tone,setTone]=useState("حرفه‌ای و متقاعدکننده");const [instructions,setInstructions]=useState("");
  const [title,setTitle]=useState("");const [content,setContent]=useState("");const [filter,setFilter]=useState("All");const [query,setQuery]=useState("");
- const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");
+ const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [attachmentFile,setAttachmentFile]=useState<File|null>(null);
  const base="/api/organizations/"+org+"/content";
  async function refresh(access=token,organization=org){
   if(!access||!organization)return;
@@ -66,6 +67,23 @@ export default function ContentStudioPage(){
   e.preventDefault();await run(async()=>{
    const created=await api<Draft>(base+"/drafts",token,{method:"POST",body:JSON.stringify({brandId:brandId||null,title:manualTitle,content:manualContent,channel,tone})});
    setManualTitle("");setManualContent("");await refresh();await openDraft(created.id);setNotice("پیش‌نویس دستی ذخیره شد؛ اکنون می‌توانید آن را ویرایش و برای تأیید ارسال کنید.");
+  });
+ }
+ async function uploadAttachment(){
+  if(!selected||!attachmentFile)return;
+  await run(async()=>{
+   const form=new FormData();form.append("file",attachmentFile);
+   const response=await fetch("/backend-api"+base+"/drafts/"+selected+"/attachment",{method:"POST",headers:{Authorization:"Bearer "+token},body:form,cache:"no-store"});
+   const data=await response.json().catch(()=>null);
+   if(!response.ok)throw new Error(data?.error??"بارگذاری فایل ناموفق بود.");
+   setAttachmentFile(null);await openDraft(selected);await refresh();setNotice("پیوست در فضای امن سازمان ذخیره شد و همراه انتشار ایتا ارسال می‌شود.");
+  });
+ }
+ async function removeAttachment(){
+  if(!selected)return;
+  await run(async()=>{
+   await api(base+"/drafts/"+selected+"/attachment",token,{method:"DELETE"});
+   await openDraft(selected);await refresh();setNotice("پیوست حذف شد.");
   });
  }
  async function save(){
@@ -145,7 +163,7 @@ export default function ContentStudioPage(){
   </section>
   {detail&&<section className="studio-editor">
    <div className="studio-editor-heading"><div><span>03 / EDITOR · {detail.aiModel||"MANUAL"}</span><h2>ویرایش و بازبینی محتوا</h2><p>هر ذخیره‌سازی یک نسخه مستقل در تاریخچه ایجاد می‌کند.</p></div><span className={"draft-status "+(detail.status==="Approved"||detail.status==="Published"?"approved":"")}>{statuses[detail.status]??detail.status}</span></div>
-   <div className="studio-editor-grid"><div className="studio-edit-fields"><label>عنوان محتوا<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={240}/></label><label>متن محتوا<textarea value={content} onChange={e=>setContent(e.target.value)} rows={15} maxLength={30000}/></label><div className="studio-editor-actions"><button className="studio-primary" disabled={busy||!title.trim()||!content.trim()} onClick={()=>void save()}>ذخیره و ایجاد نسخه</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void approve()}>{detail.status==="InReview"?"ثبت تأیید مرحله دوم":"ثبت تأیید مرحله اول"}</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!approvalComment.trim()||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void reject()}>رد و بازگشت برای اصلاح</button></div><label>یادداشت بازبینی (برای رد الزامی)<textarea value={approvalComment} onChange={e=>setApprovalComment(e.target.value)} rows={2} maxLength={1000} placeholder="نکات اصلاح یا توضیح تأیید..."/></label><div className="studio-history"><h3>گردش تأیید دو مرحله‌ای</h3>{approvals.length===0?<small>هنوز تصمیمی ثبت نشده است.</small>:approvals.map(a=><div key={a.id}><b>دور {a.reviewRound} · مرحله {a.stageNumber} · {a.decision==="Approved"?"تأیید":"رد"}</b><span>{a.comment||"بدون یادداشت"}</span><small>{new Date(a.createdAt).toLocaleString("fa-IR")}</small></div>)}</div><small>تأیید نهایی نیازمند دو مدیر متفاوت (مالک یا مدیر سازمان) است. ویرایش محتوا در جریان بازبینی، دور جدیدی ایجاد می‌کند.</small>
+   <div className="studio-editor-grid"><div className="studio-edit-fields"><label>عنوان محتوا<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={240}/></label><label>متن محتوا<textarea value={content} onChange={e=>setContent(e.target.value)} rows={15} maxLength={30000}/></label>{detail.channel==="Eitaa"&&<section className="studio-media-panel"><h3>پیوست رسانه‌ای ایتا</h3><p>یک فایل تا ۲۵ مگابایت؛ تصویر، ویدئو، صوت، PDF یا فایل فشرده. فایل همراه متن به‌عنوان توضیح ارسال می‌شود.</p>{(detail.attachments??[]).map(a=><div className="studio-media-file" key={a.id}><span>{a.fileName} · {(a.size/1024/1024).toFixed(2)} MB</span><button type="button" disabled={busy||["Scheduled","Publishing","Published"].includes(detail.status)} onClick={()=>void removeAttachment()}>حذف پیوست</button></div>)}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/mp4,audio/ogg,application/pdf,application/zip" onChange={e=>setAttachmentFile(e.target.files?.[0]??null)}/><button type="button" className="studio-approve" disabled={busy||!attachmentFile||["Scheduled","Publishing","Published"].includes(detail.status)} onClick={()=>void uploadAttachment()}>بارگذاری و ذخیره پیوست</button></section>}<div className="studio-editor-actions"><button className="studio-primary" disabled={busy||!title.trim()||!content.trim()} onClick={()=>void save()}>ذخیره و ایجاد نسخه</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void approve()}>{detail.status==="InReview"?"ثبت تأیید مرحله دوم":"ثبت تأیید مرحله اول"}</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!approvalComment.trim()||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void reject()}>رد و بازگشت برای اصلاح</button></div><label>یادداشت بازبینی (برای رد الزامی)<textarea value={approvalComment} onChange={e=>setApprovalComment(e.target.value)} rows={2} maxLength={1000} placeholder="نکات اصلاح یا توضیح تأیید..."/></label><div className="studio-history"><h3>گردش تأیید دو مرحله‌ای</h3>{approvals.length===0?<small>هنوز تصمیمی ثبت نشده است.</small>:approvals.map(a=><div key={a.id}><b>دور {a.reviewRound} · مرحله {a.stageNumber} · {a.decision==="Approved"?"تأیید":"رد"}</b><span>{a.comment||"بدون یادداشت"}</span><small>{new Date(a.createdAt).toLocaleString("fa-IR")}</small></div>)}</div><small>تأیید نهایی نیازمند دو مدیر متفاوت (مالک یا مدیر سازمان) است. ویرایش محتوا در جریان بازبینی، دور جدیدی ایجاد می‌کند.</small>
     {<section className="studio-publish"><h3>ارسال به {detail.channel==="Instagram"?"اینستاگرام":detail.channel==="Telegram"?"تلگرام":detail.channel==="Bale"?"بله":detail.channel==="Rubika"?"روبیکا":detail.channel==="Eitaa"?"ایتا":detail.channel==="WhatsApp"?"واتساپ":detail.channel}</h3><p>انتشار فقط پس از تأیید نهایی و انتخاب مقصد مشخص انجام می‌شود.</p>
      {(detail.channel==="Telegram"||detail.channel==="Eitaa")&&<><label>ربات متصل<select value={connectionId} onChange={e=>setConnectionId(e.target.value)}><option value="">انتخاب اتصال</option>{targets.filter(t=>t.provider===detail.channel).map(t=><option key={t.id} value={t.id}>{t.displayName}</option>)}</select></label>
      <label>شناسه عددی چت / کانال مقصد<input value={targetChatId} onChange={e=>setTargetChatId(e.target.value)} placeholder={detail.channel==="Eitaa"?"شناسه ایتا یا @username":"مثلاً -1001234567890 یا @channelname"}/></label>
