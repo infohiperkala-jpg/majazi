@@ -1576,6 +1576,155 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
 });
 
 
+// Meta WhatsApp Cloud API webhook verification and event ingestion.
+app.MapGet("/api/webhooks/whatsapp", (HttpRequest request, IConfiguration config) =>
+{
+    var mode = request.Query["hub.mode"].ToString();
+    var token = request.Query["hub.verify_token"].ToString();
+    var challenge = request.Query["hub.challenge"].ToString();
+    var expected = config["Meta:WebhookVerifyToken"];
+    if (!string.Equals(mode, "subscribe", StringComparison.Ordinal) ||
+        string.IsNullOrWhiteSpace(expected) ||
+        !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(expected)))
+        return Results.Unauthorized();
+    return Results.Text(challenge, "text/plain");
+});
+
+app.MapPost("/api/webhooks/whatsapp", async (HttpRequest request, MajaziDbContext db,
+    IConfiguration config, CancellationToken ct) =>
+{
+    var appSecret = config["Meta:AppSecret"];
+    if (string.IsNullOrWhiteSpace(appSecret)) return Results.Problem("Meta webhook signature validation is not configured.", statusCode: 503);
+    var supplied = request.Headers["X-Hub-Signature-256"].ToString();
+    if (!supplied.StartsWith("sha256=", StringComparison.Ordinal)) return Results.Unauthorized();
+    await using var buffer = new MemoryStream();
+    await request.Body.CopyToAsync(buffer, ct);
+    var raw = buffer.ToArray();
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(appSecret));
+    var expectedSignature = "sha256=" + Convert.ToHexString(hmac.ComputeHash(raw)).ToLowerInvariant();
+    var suppliedBytes = Encoding.UTF8.GetBytes(supplied);
+    var expectedBytes = Encoding.UTF8.GetBytes(expectedSignature);
+    if (suppliedBytes.Length != expectedBytes.Length ||
+        !CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes)) return Results.Unauthorized();
+
+    using var document = JsonDocument.Parse(raw);
+    var root = document.RootElement;
+    if (!root.TryGetProperty("object", out var objectElement) || objectElement.GetString() != "whatsapp_business_account")
+        return Results.Ok(new { accepted = true, ignored = true });
+
+    if (root.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
+    foreach (var entry in entries.EnumerateArray())
+    {
+        if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array) continue;
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (!change.TryGetProperty("value", out var value)) continue;
+            var phoneNumberId = value.TryGetProperty("metadata", out var metadata) &&
+                metadata.TryGetProperty("phone_number_id", out var phoneId) ? phoneId.GetString() : null;
+            if (string.IsNullOrWhiteSpace(phoneNumberId)) continue;
+            var channel = await db.SocialChannelConnections.SingleOrDefaultAsync(
+                x => x.Provider == "WhatsApp" && x.ExternalAccountId == phoneNumberId && x.Status == "Connected", ct);
+            if (channel is null) continue;
+
+            if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
+            foreach (var statusItem in statuses.EnumerateArray())
+            {
+                var messageId = statusItem.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+                var state = statusItem.TryGetProperty("status", out var statusElement) ? statusElement.GetString() : null;
+                if (string.IsNullOrWhiteSpace(messageId) || string.IsNullOrWhiteSpace(state)) continue;
+                var outboundMessage = await db.InboxMessages
+                    .Include(x => x.Conversation)
+                    .Where(x => x.ExternalMessageId == messageId && x.Direction == "Outbound" &&
+                        x.Conversation!.ChannelConnectionId == channel.Id)
+                    .SingleOrDefaultAsync(ct);
+                if (outboundMessage is null) continue;
+                outboundMessage.Status = state.ToLowerInvariant() switch
+                {
+                    "sent" => "Sent",
+                    "delivered" => "Delivered",
+                    "read" => "Read",
+                    "failed" => "Failed",
+                    _ => outboundMessage.Status
+                };
+                if (statusItem.TryGetProperty("errors", out var errors))
+                    outboundMessage.ProviderPayload = JsonSerializer.Serialize(new { status = state, errors });
+                await db.SaveChangesAsync(ct);
+            }
+
+            if (!value.TryGetProperty("messages", out var incoming) || incoming.ValueKind != JsonValueKind.Array) continue;
+            foreach (var item in incoming.EnumerateArray())
+            {
+                var externalMessageId = item.TryGetProperty("id", out var id) ? id.GetString() : null;
+                var sender = item.TryGetProperty("from", out var from) ? from.GetString() : null;
+                var type = item.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : "unknown";
+                if (string.IsNullOrWhiteSpace(externalMessageId) || string.IsNullOrWhiteSpace(sender) ||
+                    sender.Length > 32 || !sender.All(char.IsAsciiDigit)) continue;
+
+                var body = type switch
+                {
+                    "text" when item.TryGetProperty("text", out var textNode) && textNode.TryGetProperty("body", out var textBody) => textBody.GetString(),
+                    "image" => "[تصویر واتساپ]",
+                    "audio" => "[پیام صوتی واتساپ]",
+                    "video" => "[ویدئوی واتساپ]",
+                    "document" => item.TryGetProperty("document", out var doc) && doc.TryGetProperty("filename", out var fileName)
+                        ? $"[سند واتساپ: {fileName.GetString()}]" : "[سند واتساپ]",
+                    "sticker" => "[استیکر واتساپ]",
+                    "location" => "[موقعیت مکانی واتساپ]",
+                    "contacts" => "[مخاطب ارسالی در واتساپ]",
+                    "button" => item.TryGetProperty("button", out var button) && button.TryGetProperty("text", out var buttonText)
+                        ? buttonText.GetString() : "[پاسخ دکمه‌ای واتساپ]",
+                    "interactive" => "[پاسخ تعاملی واتساپ]",
+                    _ => $"[پیام {type ?? "ناشناخته"} واتساپ]"
+                };
+                if (string.IsNullOrWhiteSpace(body)) body = $"[پیام {type ?? "ناشناخته"} واتساپ]";
+                if (body.Length > 10000) body = body[..10000];
+
+                var conversation = await db.InboxConversations.SingleOrDefaultAsync(
+                    x => x.ChannelConnectionId == channel.Id && x.ExternalConversationId == sender, ct);
+                if (conversation is null)
+                {
+                    var displayName = value.TryGetProperty("contacts", out var contacts) && contacts.ValueKind == JsonValueKind.Array &&
+                        contacts.GetArrayLength() > 0 && contacts[0].TryGetProperty("profile", out var profile) &&
+                        profile.TryGetProperty("name", out var name) ? name.GetString() : null;
+                    conversation = new InboxConversation
+                    {
+                        OrganizationId = channel.OrganizationId, ChannelConnectionId = channel.Id,
+                        ExternalConversationId = sender,
+                        Subject = string.IsNullOrWhiteSpace(displayName) ? $"WhatsApp {sender}" : displayName,
+                        Status = "Open"
+                    };
+                    db.InboxConversations.Add(conversation);
+                    await db.SaveChangesAsync(ct);
+                }
+                var duplicate = await db.InboxMessages.AnyAsync(
+                    x => x.ConversationId == conversation.Id && x.ExternalMessageId == externalMessageId, ct);
+                if (duplicate) continue;
+                var receivedAt = DateTimeOffset.UtcNow;
+                if (item.TryGetProperty("timestamp", out var timestamp) &&
+                    long.TryParse(timestamp.ToString(), out var unixSeconds))
+                {
+                    try { receivedAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds); }
+                    catch (ArgumentOutOfRangeException) { }
+                }
+                var inboxMessage = new InboxMessage
+                {
+                    ConversationId = conversation.Id, ExternalMessageId = externalMessageId,
+                    Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt,
+                    ProviderPayload = JsonSerializer.Serialize(item)
+                };
+                db.InboxMessages.Add(inboxMessage);
+                await QueueAutomationRunsAsync(db, channel.OrganizationId, "InboxMessageReceived", "InboxMessage",
+                    inboxMessage.Id, new { messageBody = body, conversationSubject = conversation.Subject, channel = channel.Provider }, ct);
+                conversation.LastMessageAt = receivedAt;
+                conversation.UpdatedAt = DateTimeOffset.UtcNow;
+                if (conversation.Status.Equals("resolved", StringComparison.OrdinalIgnoreCase)) conversation.Status = "open";
+                await db.SaveChangesAsync(ct);
+            }
+        }
+    }
+    return Results.Ok(new { accepted = true });
+});
+
 app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Guid connectionId, string signature,
     HttpRequest request, MajaziDbContext db, IDataProtectionProvider protection, IConfiguration config, CancellationToken ct) =>
 {
