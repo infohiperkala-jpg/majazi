@@ -20,9 +20,22 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<ContentDraftVersion> ContentDraftVersions => Set<ContentDraftVersion>();
     public DbSet<ContentApprovalRecord> ContentApprovalRecords => Set<ContentApprovalRecord>();
     public DbSet<StatusDefinition> StatusDefinitions => Set<StatusDefinition>();
+    public DbSet<TextTemplate> TextTemplates => Set<TextTemplate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<TextTemplate>(e =>
+        {
+            e.ToTable("text_templates"); e.HasKey(x => x.Id);
+            e.Property(x => x.Module).HasMaxLength(80).IsRequired();
+            e.Property(x => x.Field).HasMaxLength(80).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            e.Property(x => x.Content).HasMaxLength(8000).IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.Module, x.Field, x.Name }).IsUnique();
+            e.HasIndex(x => new { x.OrganizationId, x.Module, x.Field, x.SortOrder });
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<StatusDefinition>(e =>
         {
             e.ToTable("status_definitions"); e.HasKey(x => x.Id);
