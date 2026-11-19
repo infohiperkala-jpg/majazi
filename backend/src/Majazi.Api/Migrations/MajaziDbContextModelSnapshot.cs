@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Majazi.Api.Migrations;
 
@@ -12,7 +13,11 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
 {
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
+        modelBuilder
+            .HasAnnotation("ProductVersion", "10.0.0")
+            .HasAnnotation("Relational:MaxIdentifierLength", 63);
+
+        NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
         modelBuilder.Entity("Majazi.Api.Models.SalesOrder", b =>
         {
