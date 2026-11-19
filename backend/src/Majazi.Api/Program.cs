@@ -783,8 +783,9 @@ ordersApi.MapPost("/", async (Guid organizationId, SalesOrderRequest request, Cl
             return Results.BadRequest(new { error = "نام، تعداد، قیمت یا تخفیف یکی از ردیف‌ها معتبر نیست." });
         var quantity = Math.Round(line.Quantity, 3);
         var gross = Math.Round(quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
-        if (gross > 9999999999999999m) return Results.BadRequest(new { error = "مبلغ یک ردیف از محدوده مجاز بیشتر است." });
+        if (quantity <= 0 || gross > 9999999999999999m) return Results.BadRequest(new { error = "مبلغ یک ردیف از محدوده مجاز بیشتر است." });
         var lineDiscount = Math.Round(line.Discount, 2, MidpointRounding.AwayFromZero);
+        if (lineDiscount > gross) return Results.BadRequest(new { error = "تخفیف ردیف از مبلغ ناخالص بیشتر است." });
         var lineTotal = gross - lineDiscount;
         subtotal += lineTotal;
         calculated.Add(new SalesOrderLine { Name = name, Sku = Clean(line.Sku), Quantity = quantity, UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
@@ -837,6 +838,7 @@ ordersApi.MapPut("/{orderId:guid}", async (Guid organizationId, Guid orderId, Sa
         var gross = Math.Round(quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
         if (gross > 9999999999999999m) return Results.BadRequest(new { error = "مبلغ یک ردیف از محدوده مجاز بیشتر است." });
         var lineDiscount = Math.Round(line.Discount, 2);
+        if (quantity <= 0 || lineDiscount > gross) return Results.BadRequest(new { error = "تعداد یا تخفیف ردیف معتبر نیست." });
         var lineTotal = gross - lineDiscount; subtotal += lineTotal;
         calculated.Add(new SalesOrderLine { OrderId = order.Id, Name = name, Sku = Clean(line.Sku), Quantity = quantity, UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
     }
@@ -874,7 +876,8 @@ ordersApi.MapPatch("/{orderId:guid}/status", async (Guid organizationId, Guid or
         return Results.BadRequest(new { error = "انتقال وضعیت سفارش مجاز نیست." });
     var previous = order.Status; order.Status = next; order.Version++; order.UpdatedAt = DateTimeOffset.UtcNow;
     RecordAuditEvent(db, organizationId, userId.Value, "order.status_changed", "SalesOrder", order.Id, "وضعیت سفارش تغییر کرد.", new { previous, next });
-    await db.SaveChangesAsync(ct);
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "سفارش هم‌زمان تغییر کرده است؛ اطلاعات را تازه‌سازی کنید." }); }
     return Results.Ok(new { order.Id, order.Status, order.Version, order.UpdatedAt });
 });
 
