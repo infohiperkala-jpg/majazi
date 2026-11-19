@@ -241,6 +241,7 @@ organizationsApi.MapPut("/{id:guid}", async (Guid id, CreateOrganizationRequest 
     if (name.Length > 180 || slug.Length > 100) return Results.BadRequest(new { error = "طول نام یا شناسه سازمان بیش از حد مجاز است." });
     if (await db.Organizations.AnyAsync(x => x.Id != id && x.Slug == slug, ct)) return Results.Conflict(new { error = "این شناسه سازمان قبلاً ثبت شده است." });
     item.Name = name; item.Slug = slug;
+    RecordAuditEvent(db, id, userId.Value, "organization.updated", "Organization", id, "مشخصات سازمان به‌روزرسانی شد.", new { item.Name, item.Slug });
     try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { return Results.Conflict(new { error = "شناسه سازمان تکراری است." }); }
     return Results.Ok(new { item.Id, item.Name, item.Slug, item.CreatedAt });
 });
@@ -287,6 +288,7 @@ organizationsApi.MapPost("/{id:guid}/members", async (Guid id, AddMemberRequest 
     if (await db.OrganizationMemberships.AnyAsync(x => x.UserId == target.Id && x.OrganizationId == id, ct))
         return Results.Conflict(new { error = "این کاربر عضو سازمان است." });
     db.OrganizationMemberships.Add(new OrganizationMembership { UserId = target.Id, OrganizationId = id, Role = role });
+    RecordAuditEvent(db, id, userId.Value, "member.added", "Membership", target.Id, $"کاربر {target.Email} با نقش {role} به سازمان افزوده شد.");
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{id}/members", new { userId = target.Id, email = target.Email, role });
 });
@@ -305,6 +307,7 @@ organizationsApi.MapPut("/{id:guid}/members/{memberId:guid}", async (Guid id, Gu
     if (target.Role == "Owner" || (actor.Role != "Owner" && target.Role == "Admin")) return Results.Forbid();
     if (memberId == userId.Value && role != actor.Role) return Results.BadRequest(new { error = "امکان تغییر نقش خودتان وجود ندارد." });
     target.Role = role;
+    RecordAuditEvent(db, id, userId.Value, "member.role_changed", "Membership", memberId, $"نقش {target.User!.Email} به {role} تغییر کرد.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { userId = target.UserId, email = target.User!.Email, target.Role, target.CreatedAt });
 });
@@ -321,8 +324,48 @@ organizationsApi.MapDelete("/{id:guid}/members/{memberId:guid}", async (Guid id,
     if (target.Role == "Owner" || (actor.Role != "Owner" && target.Role == "Admin"))
         return Results.Forbid();
     db.OrganizationMemberships.Remove(target);
+    RecordAuditEvent(db, id, userId.Value, "member.removed", "Membership", memberId, $"دسترسی عضو {memberId} لغو شد.");
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
+});
+
+organizationsApi.MapGet("/{id:guid}/audit-events", async (
+    Guid id, int? page, int? pageSize, string? action, string? q,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == id, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+
+    var currentPage = Math.Clamp(page ?? 1, 1, 100000);
+    var size = Math.Clamp(pageSize ?? 30, 10, 100);
+    var query = db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == id);
+    if (!string.IsNullOrWhiteSpace(action))
+    {
+        var actionFilter = action.Trim();
+        query = query.Where(x => x.Action == actionFilter);
+    }
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        if (term.Length > 120) return Results.BadRequest(new { error = "عبارت جست‌وجو بیش از حد طولانی است." });
+        query = query.Where(x => x.Summary.Contains(term) || x.EntityType.Contains(term) || x.Action.Contains(term));
+    }
+    var total = await query.CountAsync(ct);
+    var items = await query.OrderByDescending(x => x.CreatedAt)
+        .Skip((currentPage - 1) * size).Take(size)
+        .Select(e => new
+        {
+            e.Id, e.Action, e.EntityType, e.EntityId, e.Summary, e.MetadataJson, e.CreatedAt,
+            ActorEmail = db.Users.AsNoTracking().Where(u => e.ActorUserId == u.Id).Select(u => u.Email).FirstOrDefault()
+        })
+        .ToListAsync(ct);
+    var actions = await db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == id)
+        .Select(x => x.Action).Distinct().OrderBy(x => x).ToListAsync(ct);
+    return Results.Ok(new { items, total, page = currentPage, pageSize = size, actions });
 });
 
 organizationsApi.MapGet("/{id:guid}/brands", async (Guid id, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
@@ -505,6 +548,7 @@ crmApi.MapPost("/contacts", async (Guid organizationId, CrmContactRequest reques
     var item = new CrmContact { OrganizationId = organizationId, BrandId = request.BrandId, FullName = name,
         Email = Clean(request.Email), Phone = Clean(request.Phone), Company = Clean(request.Company), Notes = Clean(request.Notes) };
     db.CrmContacts.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.contact_created", "CrmContact", item.Id, "مخاطب جدید ایجاد شد.");
     await QueueAutomationRunsAsync(db, organizationId, "ContactCreated", "Contact", item.Id, new { contactName = item.FullName, company = item.Company }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/contacts/{item.Id}",
@@ -526,6 +570,7 @@ crmApi.MapPut("/contacts/{contactId:guid}", async (Guid organizationId, Guid con
         return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
     item.FullName = name; item.BrandId = request.BrandId; item.Email = Clean(request.Email);
     item.Phone = Clean(request.Phone); item.Company = Clean(request.Company); item.Notes = Clean(request.Notes);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.contact_updated", "CrmContact", item.Id, "اطلاعات مخاطب ویرایش شد.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.BrandId, item.FullName, item.Email, item.Phone, item.Company, item.Notes, item.CreatedAt });
 });
@@ -537,6 +582,7 @@ crmApi.MapDelete("/contacts/{contactId:guid}", async (Guid organizationId, Guid 
     var item = await db.CrmContacts.SingleOrDefaultAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     db.CrmContacts.Remove(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.contact_deleted", "CrmContact", contactId, "مخاطب حذف شد.");
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -569,6 +615,7 @@ crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, Cla
     var item = new CrmLead { OrganizationId = organizationId, BrandId = request.BrandId, ContactId = request.ContactId,
         Title = title, Stage = stage, EstimatedValue = request.EstimatedValue, Source = Clean(request.Source), Notes = Clean(request.Notes) };
     db.CrmLeads.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_created", "CrmLead", item.Id, "فرصت فروش ایجاد شد.", new { item.Stage });
     await QueueAutomationRunsAsync(db, organizationId, "LeadCreated", "Lead", item.Id, new { leadTitle = item.Title, leadStage = item.Stage, leadSource = item.Source }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/leads/{item.Id}", new { item.Id, item.Title, item.Stage, item.EstimatedValue, item.ContactId, item.BrandId, item.Source, item.Notes, item.CreatedAt, item.UpdatedAt });
@@ -593,6 +640,7 @@ crmApi.MapPut("/leads/{leadId:guid}", async (Guid organizationId, Guid leadId, C
     item.Title = title; item.Stage = stage; item.BrandId = request.BrandId; item.ContactId = request.ContactId;
     item.EstimatedValue = request.EstimatedValue; item.Source = Clean(request.Source); item.Notes = Clean(request.Notes);
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_updated", "CrmLead", item.Id, "اطلاعات فرصت فروش ویرایش شد.", new { previousStage, newStage = item.Stage });
     if (!string.Equals(previousStage, item.Stage, StringComparison.OrdinalIgnoreCase))
         await QueueAutomationRunsAsync(db, organizationId, "LeadStageChanged", "Lead", item.Id, new { previousStage, newStage = item.Stage }, ct);
     await db.SaveChangesAsync(ct);
@@ -606,6 +654,7 @@ crmApi.MapDelete("/leads/{leadId:guid}", async (Guid organizationId, Guid leadId
     var item = await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     db.CrmLeads.Remove(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_deleted", "CrmLead", leadId, "فرصت فروش حذف شد.");
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -620,6 +669,7 @@ crmApi.MapPatch("/leads/{leadId:guid}/stage", async (Guid organizationId, Guid l
     var previousStage = item.Stage;
     item.Stage = request.Stage;
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_stage_changed", "CrmLead", item.Id, "مرحله فرصت فروش تغییر کرد.", new { previousStage, newStage = item.Stage });
     if (!string.Equals(previousStage, item.Stage, StringComparison.OrdinalIgnoreCase))
         await QueueAutomationRunsAsync(db, organizationId, "LeadStageChanged", "Lead", item.Id, new { previousStage, newStage = item.Stage }, ct);
     await db.SaveChangesAsync(ct);
@@ -651,6 +701,7 @@ crmApi.MapPost("/activities", async (Guid organizationId, CrmActivityRequest req
     var item = new CrmActivity { OrganizationId = organizationId, ContactId = request.ContactId, LeadId = request.LeadId,
         CreatedByUserId = userId.Value, ActivityType = type, Summary = summary, OccurredAt = request.OccurredAt ?? DateTimeOffset.UtcNow };
     db.CrmActivities.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.activity_created", "CrmActivity", item.Id, "فعالیت CRM ثبت شد.", new { item.ActivityType });
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/activities/{item.Id}", new { item.Id, item.ContactId, item.LeadId, item.ActivityType, item.Summary, item.OccurredAt, item.CreatedByUserId });
 });
@@ -687,7 +738,7 @@ campaignsApi.MapPost("/", async (Guid organizationId, CampaignRequest request, C
     var item = new MarketingCampaign { OrganizationId = organizationId, BrandId = request.BrandId, Name = name,
         Objective = Clean(request.Objective), Channel = channel, Status = status, Budget = request.Budget,
         StartsAt = request.StartsAt, EndsAt = request.EndsAt, Notes = Clean(request.Notes), ActualSpend = request.ActualSpend, AttributedRevenue = request.AttributedRevenue, Impressions = request.Impressions, Clicks = request.Clicks, Conversions = request.Conversions };
-    db.MarketingCampaigns.Add(item); await db.SaveChangesAsync(ct);
+    db.MarketingCampaigns.Add(item); RecordAuditEvent(db, organizationId, userId.Value, "campaign.created", "MarketingCampaign", item.Id, "کمپین ایجاد شد.", new { item.Channel, item.Status }); await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/campaigns/{item.Id}", item);
 });
 
@@ -709,6 +760,7 @@ campaignsApi.MapPut("/{campaignId:guid}", async (Guid organizationId, Guid campa
     item.Name = name; item.Objective = Clean(request.Objective); item.Channel = channel; item.Status = status;
     item.BrandId = request.BrandId; item.Budget = request.Budget; item.StartsAt = request.StartsAt;
     item.EndsAt = request.EndsAt; item.Notes = Clean(request.Notes); item.ActualSpend = request.ActualSpend; item.AttributedRevenue = request.AttributedRevenue; item.Impressions = request.Impressions; item.Clicks = request.Clicks; item.Conversions = request.Conversions; item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "campaign.updated", "MarketingCampaign", item.Id, "اطلاعات کمپین ویرایش شد.", new { item.Channel, item.Status });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.BrandId, item.Name, item.Objective, item.Channel, item.Status, item.Budget, item.ActualSpend, item.AttributedRevenue, item.Impressions, item.Clicks, item.Conversions, item.StartsAt, item.EndsAt, item.Notes, item.UpdatedAt });
 });
@@ -768,7 +820,7 @@ campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid ca
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var item = await db.MarketingCampaigns.SingleOrDefaultAsync(x => x.Id == campaignId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
-    db.MarketingCampaigns.Remove(item); await db.SaveChangesAsync(ct); return Results.NoContent();
+    db.MarketingCampaigns.Remove(item); RecordAuditEvent(db, organizationId, userId.Value, "campaign.deleted", "MarketingCampaign", campaignId, "کمپین حذف شد."); await db.SaveChangesAsync(ct); return Results.NoContent();
 });
 
 
@@ -937,6 +989,7 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         Status = credential is null ? "PendingAuthorization" : "CredentialsStored"
     };
     db.SocialChannelConnections.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "channel.connected", "SocialChannelConnection", item.Id, "اتصال کانال اجتماعی ثبت شد.", new { item.Provider, item.Status });
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/channels/{item.Id}",
         new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
@@ -1125,6 +1178,7 @@ channelsApi.MapDelete("/{connectionId:guid}", async (Guid organizationId, Guid c
     var item = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == connectionId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     db.SocialChannelConnections.Remove(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "channel.removed", "SocialChannelConnection", connectionId, "اتصال کانال اجتماعی حذف شد.", new { item.Provider });
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -1463,6 +1517,38 @@ templatesApi.MapDelete("/{templateId:guid}", async (Guid organizationId, Guid te
     return Results.NoContent();
 });
 
+var auditApi = app.MapGroup("/api/organizations/{organizationId:guid}/audit").RequireAuthorization();
+auditApi.MapGet("/events", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    string? q, string? action, int? page, int? pageSize, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var query = db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(action)) query = query.Where(x => x.Action == action);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        query = query.Where(x => x.Summary.Contains(term) || x.EntityType.Contains(term) || x.Action.Contains(term));
+    }
+    var total = await query.CountAsync(ct);
+    var currentPage = Math.Clamp(page ?? 1, 1, 10000);
+    var take = Math.Clamp(pageSize ?? 50, 1, 100);
+    var items = await query.OrderByDescending(x => x.CreatedAt).Skip((currentPage - 1) * take).Take(take)
+        .Select(x => new
+        {
+            x.Id, x.Action, x.EntityType, x.EntityId, x.Summary, x.CreatedAt,
+            x.ActorUserId,
+            actorEmail = db.Users.Where(u => u.Id == x.ActorUserId).Select(u => u.Email).FirstOrDefault()
+        }).ToListAsync(ct);
+    var actions = await db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+        .Select(x => x.Action).Distinct().OrderBy(x => x).ToListAsync(ct);
+    return Results.Ok(new { items, total, page = currentPage, pageSize = take, actions });
+});
+
 var knowledgeApi = app.MapGroup("/api/organizations/{organizationId:guid}/knowledge").RequireAuthorization();
 
 knowledgeApi.MapGet("/articles", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
@@ -1552,6 +1638,7 @@ knowledgeApi.MapPost("/articles", async (Guid organizationId, KnowledgeArticleRe
         Body = body, Category = category, Tags = tags, ChangeNote = Clean(request.ChangeNote) ?? "نسخه اولیه",
         CreatedByUserId = userId.Value, CreatedAt = now
     });
+    RecordAuditEvent(db, organizationId, userId.Value, "knowledge.created", "KnowledgeArticle", article.Id, $"مقاله «{title}» ایجاد شد.");
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/knowledge/articles/{article.Id}",
         new { article.Id, article.Title, article.Slug, article.Summary, article.Category, article.Tags,
@@ -1588,6 +1675,7 @@ knowledgeApi.MapPut("/articles/{articleId:guid}", async (Guid organizationId, Gu
         Body = article.Body, Category = article.Category, Tags = article.Tags,
         ChangeNote = Clean(request.ChangeNote) ?? "ویرایش مقاله", CreatedByUserId = userId.Value
     });
+    RecordAuditEvent(db, organizationId, userId.Value, "knowledge.updated", "KnowledgeArticle", article.Id, $"مقاله «{article.Title}» به نسخه {article.Version} رسید.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { article.Id, article.Title, article.Slug, article.Summary, article.Category, article.Tags,
         article.Status, article.Version, article.PublishedAt, article.UpdatedAt });
@@ -1608,6 +1696,7 @@ knowledgeApi.MapPatch("/articles/{articleId:guid}/status", async (Guid organizat
     article.Status = request.Status;
     article.PublishedAt = request.Status == "Published" ? article.PublishedAt ?? DateTimeOffset.UtcNow : null;
     article.UpdatedByUserId = userId.Value; article.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "knowledge.status_changed", "KnowledgeArticle", article.Id, $"وضعیت مقاله «{article.Title}» به {article.Status} تغییر کرد.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { article.Id, article.Status, article.PublishedAt, article.UpdatedAt });
 });
@@ -1631,6 +1720,7 @@ knowledgeApi.MapPost("/articles/{articleId:guid}/revisions/{revisionId:guid}/res
         Body = article.Body, Category = article.Category, Tags = article.Tags,
         ChangeNote = Clean(request.ChangeNote) ?? $"بازیابی از نسخه {revision.Version}", CreatedByUserId = userId.Value
     });
+    RecordAuditEvent(db, organizationId, userId.Value, "knowledge.revision_restored", "KnowledgeArticle", article.Id, $"نسخه {revision.Version} مقاله «{article.Title}» بازیابی شد.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { article.Id, article.Version, article.Title, article.UpdatedAt });
 });
@@ -1688,6 +1778,7 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
         ActionValue = actionValue, IsEnabled = request.IsEnabled
     };
     db.AutomationRules.Add(rule);
+    RecordAuditEvent(db, organizationId, userId.Value, "automation.created", "AutomationRule", rule.Id, $"قانون اتوماسیون «{rule.Name}» ایجاد شد.");
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/automations/rules/{rule.Id}",
         new { rule.Id, rule.Name, rule.Trigger, rule.ConditionField, rule.ConditionOperator, rule.ConditionValue,
@@ -1728,6 +1819,7 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
     rule.ConditionOperator = conditionOperator; rule.ConditionValue = conditionField == "Any" ? null : Clean(request.ConditionValue);
     rule.ActionType = actionType; rule.ActivityType = actionType == "CreateActivity" ? request.ActivityType : null;
     rule.ActionValue = actionValue; rule.IsEnabled = request.IsEnabled; rule.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "automation.updated", "AutomationRule", rule.Id, $"قانون اتوماسیون «{rule.Name}» ویرایش شد.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { rule.Id, rule.Name, rule.Trigger, rule.ConditionField, rule.ConditionOperator, rule.ConditionValue,
         rule.ActionType, rule.ActivityType, rule.ActionValue, rule.IsEnabled, rule.UpdatedAt });
@@ -1745,6 +1837,7 @@ automationApi.MapDelete("/rules/{ruleId:guid}", async (Guid organizationId, Guid
     if (rule is null) return Results.NotFound();
     rule.IsEnabled = false;
     rule.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "automation.disabled", "AutomationRule", rule.Id, $"قانون اتوماسیون «{rule.Name}» غیرفعال شد.");
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -2291,6 +2384,7 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
         Status = initialStatus, LastMessageAt = DateTimeOffset.UtcNow
     };
     db.InboxConversations.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "inbox.conversation_created", "InboxConversation", item.Id, "مکالمه جدید ایجاد شد.");
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/inbox/conversations/{item.Id}",
         new { item.Id, item.Subject, item.Status, item.ChannelConnectionId, item.ContactId, item.CreatedAt });
@@ -2403,6 +2497,7 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
         item.AssignedToUserId = assignee == Guid.Empty ? null : assignee;
     }
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "inbox.conversation_updated", "InboxConversation", item.Id, "وضعیت یا مسئول مکالمه تغییر کرد.", new { item.Status, item.AssignedToUserId });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.Status, item.AssignedToUserId, item.UpdatedAt });
 });
@@ -2410,6 +2505,18 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
 app.Run();
 
 
+
+static void RecordAuditEvent(MajaziDbContext db, Guid organizationId, Guid? actorUserId,
+    string action, string entityType, Guid? entityId, string summary, object? metadata = null)
+{
+    db.OrganizationAuditEvents.Add(new OrganizationAuditEvent
+    {
+        OrganizationId = organizationId, ActorUserId = actorUserId, Action = action,
+        EntityType = entityType, EntityId = entityId,
+        Summary = summary.Length > 500 ? summary[..500] : summary,
+        MetadataJson = JsonSerializer.Serialize(metadata ?? new { })
+    });
+}
 
 static async Task QueueAutomationRunsAsync(MajaziDbContext db, Guid organizationId, string trigger, string subjectType, Guid subjectId, object payload, CancellationToken ct)
 {

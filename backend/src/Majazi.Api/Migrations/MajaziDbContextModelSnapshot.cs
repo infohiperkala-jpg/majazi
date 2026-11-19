@@ -14,6 +14,23 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.OrganizationAuditEvent", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("Action").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+            b.Property<Guid?>("ActorUserId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid?>("EntityId").HasColumnType("uuid");
+            b.Property<string>("EntityType").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+            b.Property<string>("MetadataJson").IsRequired().HasColumnType("jsonb");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Summary").IsRequired().HasMaxLength(500).HasColumnType("character varying(500)");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "Action", "CreatedAt");
+            b.HasIndex("OrganizationId", "CreatedAt");
+            b.ToTable("organization_audit_events", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.KnowledgeArticle", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -35,6 +52,11 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasIndex("OrganizationId", "Slug").IsUnique();
             b.HasIndex("OrganizationId", "Status", "UpdatedAt");
             b.ToTable("knowledge_articles", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.OrganizationAuditEvent", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
 
         modelBuilder.Entity("Majazi.Api.Models.KnowledgeArticleRevision", b =>

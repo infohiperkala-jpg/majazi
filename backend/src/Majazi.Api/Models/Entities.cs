@@ -316,3 +316,17 @@ public sealed class KnowledgeArticleRevision
     public Guid CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+
+public sealed class OrganizationAuditEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? ActorUserId { get; set; }
+    public required string Action { get; set; }
+    public required string EntityType { get; set; }
+    public Guid? EntityId { get; set; }
+    public required string Summary { get; set; }
+    public string MetadataJson { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
