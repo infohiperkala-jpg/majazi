@@ -3131,8 +3131,11 @@ contentApi.MapPost("/drafts/{draftId:guid}/attachment", async (Guid organization
     var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4",
-        "audio/mpeg", "audio/mp4", "audio/ogg", "application/pdf",
-        "application/zip", "application/octet-stream"
+        "audio/mpeg", "audio/mp4", "audio/ogg", "audio/aac", "audio/amr", "application/pdf",
+        "application/zip", "application/octet-stream", "text/plain", "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     };
     var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType.Split(';')[0].Trim();
     if (!allowedTypes.Contains(contentType))
