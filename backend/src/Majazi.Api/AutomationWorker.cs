@@ -38,7 +38,8 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
             var now = DateTimeOffset.UtcNow;
             var claimed = await db.AutomationRuns.Where(x => x.Id == id && x.Status == "Pending")
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "Running")
-                    .SetProperty(x => x.StartedAt, now), ct);
+                    .SetProperty(x => x.StartedAt, now)
+                    .SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1), ct);
             if (claimed == 0) continue;
             var run = await db.AutomationRuns.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null) continue;
