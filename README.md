@@ -25,6 +25,11 @@
 - The first adapter scope is text messaging. Media upload/download, channel-wide broadcasts, and provider-specific advanced controls are not implied by this connection.
 
 
+## Telegram media publishing
+- Content drafts for Telegram can carry one persisted media/document attachment up to 25 MiB.
+- The publisher uses the official Bot API `sendDocument` multipart upload with `chat_id`, `document`, and `caption`; text-only drafts continue to use `sendMessage`.
+- Telegram captions are validated to the 1,024-character limit before a scheduled or immediate publication is queued. Attachments are stored in PostgreSQL and are not exposed through a public file URL.
+
 ## Eitaa publishing through EitaaYar
 - Register an EitaaYar API token (not an assumed native Eitaa bot token) as the channel credential. The adapter validates it with `getMe` and publishes approved text drafts using `sendMessage` at `https://eitaayar.ir/api/{TOKEN}/{METHOD}`.
 - Publishing uses `application/x-www-form-urlencoded` with `chat_id` and `text`. The destination may be a numeric chat/channel ID or a supported username. The destination must already be available to the EitaaYar account and authorized for delivery.
