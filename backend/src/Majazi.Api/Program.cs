@@ -1213,11 +1213,72 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
     });
     conversation.LastMessageAt = receivedAt;
     conversation.UpdatedAt = DateTimeOffset.UtcNow;
-    if (conversation.Status == "Resolved") conversation.Status = "Open";
+    if (conversation.Status.Equals("resolved", StringComparison.OrdinalIgnoreCase)) conversation.Status = "open";
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { accepted = true });
 });
 
+
+var aiApi = app.MapGroup("/api/organizations/{organizationId:guid}/ai").RequireAuthorization();
+
+aiApi.MapPost("/generate-text", async (Guid organizationId, GenerateAssistantTextRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var module = request.Module?.Trim().ToLowerInvariant();
+    var field = request.Field?.Trim().ToLowerInvariant();
+    var context = request.Context?.Trim();
+    var currentText = request.CurrentText?.Trim();
+    var instructions = request.Instructions?.Trim();
+    var allowed = new Dictionary<string, HashSet<string>>
+    {
+        ["crm"] = ["contact.notes", "lead.notes", "activity.summary"],
+        ["campaign"] = ["objective", "notes"],
+        ["inbox"] = ["conversation.subject", "message.reply"],
+        ["content"] = ["title", "body", "description"]
+    };
+    if (module is null || field is null || !allowed.TryGetValue(module, out var fields) || !fields.Contains(field) ||
+        string.IsNullOrWhiteSpace(context) || context.Length > 1500 || (currentText?.Length ?? 0) > 5000 ||
+        (instructions?.Length ?? 0) > 2000)
+        return Results.BadRequest(new { error = "نوع متن یا اطلاعات زمینه معتبر نیست." });
+    var apiKey = config["AI:ApiKey"];
+    var baseUrl = config["AI:BaseUrl"]?.TrimEnd('/');
+    var model = config["AI:Model"];
+    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl) ||
+        !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
+        endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback || string.IsNullOrWhiteSpace(model))
+        return Results.Problem("اتصال هوش مصنوعی پیکربندی نشده است.", statusCode: 503);
+    var systemPrompt = "شما دستیار حرفه‌ای نگارش فارسی برای یک سامانه مدیریت کسب‌وکار هستید. متن روشن، دقیق، طبیعی، کاربردی و متناسب با زمینه بنویسید. اطلاعات، عدد، نام، وعده یا ادعای تأییدنشده اختراع نکنید. خروجی را فقط به شکل JSON با کلید text برگردانید.";
+    var userPrompt = $"ماژول: {module}\nفیلد: {field}\nزمینه: {context}\nمتن فعلی برای بازنویسی: {currentText ?? "وجود ندارد"}\nدستور کاربر: {instructions ?? "یک متن آماده و حرفه‌ای بنویس."}\nفقط متن نهایی قابل ویرایش را تولید کن.";
+    try
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/chat/completions");
+        message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        message.Content = JsonContent.Create(new
+        {
+            model, temperature = 0.55,
+            response_format = new { type = "json_object" },
+            messages = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
+        });
+        using var response = await clients.CreateClient("AIProvider").SendAsync(message, ct);
+        if (!response.IsSuccessStatusCode)
+            return Results.Problem("سرویس هوش مصنوعی پاسخ موفق نداد (" + (int)response.StatusCode + ").", statusCode: 502);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var generated = document.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        if (string.IsNullOrWhiteSpace(generated)) return Results.Problem("پاسخ مدل خالی بود.", statusCode: 502);
+        using var output = JsonDocument.Parse(generated);
+        var text = output.RootElement.TryGetProperty("text", out var node) ? node.GetString()?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 5000)
+            return Results.Problem("متن تولیدشده معتبر نیست.", statusCode: 502);
+        return Results.Ok(new { text, model });
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+    catch (Exception)
+    {
+        return Results.Problem("تولید متن با هوش مصنوعی انجام نشد؛ تنظیمات مدل و دسترسی سرویس را بررسی کنید.", statusCode: 502);
+    }
+});
 
 var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
 
@@ -1954,6 +2015,7 @@ record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string Di
 
 public sealed record CreateManualContentDraftRequest(Guid? BrandId, string? Title, string? Content, string? Channel, string? Tone);
 public sealed record GenerateContentRequest(Guid? BrandId, string? Topic, string? Channel, string? Tone, string? Instructions);
+public sealed record GenerateAssistantTextRequest(string? Module, string? Field, string? Context, string? CurrentText, string? Instructions);
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
 
 public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt);
