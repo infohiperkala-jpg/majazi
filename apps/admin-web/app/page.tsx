@@ -28,6 +28,7 @@ const modules = [
   ["گزارش‌ها و هوش تجاری", "گزارش عملکرد و تحلیل شاخص‌ها", "BI"],
   ["مدیریت هزینه‌ها و عملکرد", "بودجه، هزینه و بازدهی", "FN"],
   ["مدیریت وضعیت‌های سازمان", "تعریف و ویرایش وضعیت‌های CRM، کمپین و مکالمات", "ST"],
+  ["کتابخانه متن‌های آماده", "قالب‌های قابل ویرایش و درج در فرم‌ها", "TX"],
   ["امنیت، حسابرسی و تنظیمات", "امنیت، رویدادها و پیکربندی", "SE"],
 ];
 
@@ -317,6 +318,7 @@ export default function Home() {
       <a className="nav" href="#modules"><span>۱۹.</span> مدیریت هزینه‌ها و عملکرد</a>
       <a className="nav" href="#modules"><span>۲۰.</span> امنیت، حسابرسی و تنظیمات</a>
       <a className="nav" href="/statuses"><span>۲۱.</span> مدیریت وضعیت‌های سازمان</a>
+      <a className="nav" href="/templates"><span>۲۲.</span> کتابخانه متن‌های آماده</a>
       <div className="sidebar-bottom"><i/> اتصال زنده به هسته سامانه</div>
     </aside>
     <section className="content">
@@ -379,7 +381,7 @@ export default function Home() {
       </div>
 
       <div className="section-heading" id="modules"><div><h2>ماژول‌های سامانه</h2><p>ساختار فضای کاری MAJAZI</p></div></div>
-      <div className="module-grid">{modules.map(([name, desc, code]) => code === "CT" ? <a className="module module-link" href="/content" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · استودیوی محتوا</small></a> : code === "CM" ? <a className="module module-link" href="/campaigns" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قابل استفاده</small></a> : code === "CH" ? <a className="module module-link" href="/channels" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · کانال‌ها</small></a> : code === "CR" ? <a className="module module-link" href="/crm" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · CRM</small></a> : code === "IN" ? <a className="module module-link" href="/inbox" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · صندوق پیام‌ها</small></a> : code === "ST" ? <a className="module module-link" href="/statuses" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>مدیریت وضعیت‌های قابل تنظیم</small></a> : <article className="module" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>در حال توسعه</small></article>)}</div>
+      <div className="module-grid">{modules.map(([name, desc, code]) => code === "CT" ? <a className="module module-link" href="/content" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · استودیوی محتوا</small></a> : code === "CM" ? <a className="module module-link" href="/campaigns" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قابل استفاده</small></a> : code === "CH" ? <a className="module module-link" href="/channels" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · کانال‌ها</small></a> : code === "CR" ? <a className="module module-link" href="/crm" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · CRM</small></a> : code === "IN" ? <a className="module module-link" href="/inbox" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>فعال · صندوق پیام‌ها</small></a> : code === "ST" ? <a className="module module-link" href="/statuses" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>مدیریت وضعیت‌های قابل تنظیم</small></a> : code === "TX" ? <a className="module module-link" href="/templates" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>قالب‌های متنی سازمان</small></a> : <article className="module" key={code}><span className="module-icon">{code}</span><div><h3>{name}</h3><p>{desc}</p></div><span className="arrow">←</span><small>در حال توسعه</small></article>)}</div>
       <footer>MAJAZI · مرکز هوشمند بازاریابی و فروش</footer>
     </section>
   </main>;
