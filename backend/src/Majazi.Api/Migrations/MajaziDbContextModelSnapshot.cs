@@ -363,6 +363,20 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         });
 
 
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraftAttachment", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("ContentType").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+            b.Property<byte[]>("Data").IsRequired().HasColumnType("bytea");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("DraftId").HasColumnType("uuid");
+            b.Property<string>("FileName").IsRequired().HasMaxLength(255).HasColumnType("character varying(255)");
+            b.Property<long>("Size").HasColumnType("bigint");
+            b.HasKey("Id");
+            b.HasIndex("DraftId").IsUnique();
+            b.ToTable("content_draft_attachments", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -408,6 +422,11 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasIndex("OrganizationId", "CreatedAt");
             b.HasIndex("DraftId", "ReviewRound", "StageNumber").IsUnique();
             b.ToTable("content_approval_records", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraftAttachment", b =>
+        {
+            b.HasOne("Majazi.Api.Models.ContentDraft", null).WithMany().HasForeignKey("DraftId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
 
         modelBuilder.Entity("Majazi.Api.Models.ContentDraftVersion", b =>
