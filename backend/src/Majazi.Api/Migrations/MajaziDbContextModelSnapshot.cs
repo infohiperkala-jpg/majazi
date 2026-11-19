@@ -67,6 +67,50 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         });
 
 
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("ApprovedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid?>("ApprovedByUserId").HasColumnType("uuid");
+            b.Property<string>("AiModel").HasMaxLength(120).HasColumnType("character varying(120)");
+            b.Property<Guid?>("BrandId").HasColumnType("uuid");
+            b.Property<string>("Channel").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.Property<string>("Content").IsRequired().HasMaxLength(30000).HasColumnType("character varying(30000)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Prompt").HasMaxLength(4000).HasColumnType("character varying(4000)");
+            b.Property<DateTimeOffset?>("PublishedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid?>("PublishConnectionId").HasColumnType("uuid");
+            b.Property<string>("PublishError").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<DateTimeOffset?>("ScheduledAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("PublishTarget").HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("Status").IsRequired().HasMaxLength(24).HasColumnType("character varying(24)");
+            b.Property<string>("Title").IsRequired().HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<string>("Tone").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("BrandId");
+            b.HasIndex("OrganizationId", "Status", "UpdatedAt");
+            b.HasIndex("Status", "ScheduledAt");
+            b.ToTable("content_drafts", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraftVersion", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("ChangeNote").IsRequired().HasMaxLength(300).HasColumnType("character varying(300)");
+            b.Property<string>("Content").IsRequired().HasMaxLength(30000).HasColumnType("character varying(30000)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<Guid>("DraftId").HasColumnType("uuid");
+            b.Property<string>("Title").IsRequired().HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<int>("VersionNumber").HasColumnType("integer");
+            b.HasKey("Id");
+            b.HasIndex("DraftId", "VersionNumber").IsUnique();
+            b.ToTable("content_draft_versions", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
         {
             b.HasOne("Majazi.Api.Models.SocialChannelConnection", "ChannelConnection").WithMany().HasForeignKey("ChannelConnectionId").OnDelete(DeleteBehavior.SetNull);
@@ -223,6 +267,24 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasIndex("LeadId");
             b.HasIndex("OrganizationId", "OccurredAt");
             b.ToTable("crm_activities", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Brand", null).WithMany().HasForeignKey("BrandId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraftVersion", b =>
+        {
+            b.HasOne("Majazi.Api.Models.ContentDraft", "Draft").WithMany("Versions")
+                .HasForeignKey("DraftId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Draft");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
+        {
+            b.Navigation("Versions");
         });
 
         modelBuilder.Entity("Majazi.Api.Models.CrmContact", b =>
