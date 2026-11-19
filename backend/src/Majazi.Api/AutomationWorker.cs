@@ -58,14 +58,19 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
                     var lead = run.SubjectType == "Lead"
                         ? await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == run.SubjectId && x.OrganizationId == run.OrganizationId, ct)
                         : null;
-                    if (contact is null && lead is null) throw new InvalidOperationException("رکورد محرک دیگر در سازمان وجود ندارد.");
+                    var draft = run.SubjectType == "ContentDraft"
+                        ? await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == run.SubjectId && x.OrganizationId == run.OrganizationId, ct)
+                        : null;
+                    if (contact is null && lead is null && draft is null) throw new InvalidOperationException("رکورد محرک دیگر در سازمان وجود ندارد.");
+                    if (draft is not null && (draft.Status != "Approved" || rule.Trigger != "ContentApproved"))
+                        throw new InvalidOperationException("محتوا دیگر در وضعیت تأیید نهایی نیست.");
                     if (!Matches(rule, contact, lead))
                     {
                         run.Status = "Skipped"; run.Result = "شرط قانون برقرار نبود.";
                     }
                     else if (rule.ActionType == "CreateActivity")
                     {
-                        var summary = Expand(rule.ActionValue, contact, lead);
+                        var summary = Expand(rule.ActionValue, contact, lead, draft);
                         var activity = new CrmActivity
                         {
                             OrganizationId = run.OrganizationId, ContactId = contact?.Id ?? lead?.ContactId,
@@ -117,9 +122,11 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
             : string.Equals(actual, rule.ConditionValue, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string Expand(string template, CrmContact? contact, CrmLead? lead) => template
+    private static string Expand(string template, CrmContact? contact, CrmLead? lead, ContentDraft? draft) => template
         .Replace("{contactName}", contact?.FullName ?? "", StringComparison.OrdinalIgnoreCase)
         .Replace("{leadTitle}", lead?.Title ?? "", StringComparison.OrdinalIgnoreCase)
         .Replace("{leadStage}", lead?.Stage ?? "", StringComparison.OrdinalIgnoreCase)
-        .Replace("{leadSource}", lead?.Source ?? "", StringComparison.OrdinalIgnoreCase);
+        .Replace("{leadSource}", lead?.Source ?? "", StringComparison.OrdinalIgnoreCase)
+        .Replace("{contentTitle}", draft?.Title ?? "", StringComparison.OrdinalIgnoreCase)
+        .Replace("{contentChannel}", draft?.Channel ?? "", StringComparison.OrdinalIgnoreCase);
 }
