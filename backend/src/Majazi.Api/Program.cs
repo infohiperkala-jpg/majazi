@@ -1021,6 +1021,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var scheduledAt = request.ScheduledAt;
     if (scheduledAt is null || scheduledAt <= DateTimeOffset.UtcNow.AddMinutes(1) || scheduledAt > DateTimeOffset.UtcNow.AddYears(1))
         return Results.BadRequest(new { error = "زمان انتشار باید حداقل یک دقیقه بعد و حداکثر تا یک سال آینده باشد." });
+    if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (string.IsNullOrWhiteSpace(request.TargetChatId) || request.TargetChatId.Length > 180 ||
         !long.TryParse(request.TargetChatId, out _))
         return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام را وارد کنید." });
@@ -1050,6 +1051,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     if (draft is null) return Results.NotFound();
     if (draft.Status != "Approved" || draft.Channel != "Telegram")
         return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام قابل انتشار است." });
+    if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (string.IsNullOrWhiteSpace(request.TargetChatId) || !long.TryParse(request.TargetChatId, out _))
         return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام الزامی است." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
@@ -1092,7 +1094,7 @@ contentApi.MapGet("/drafts", async (Guid organizationId, ClaimsPrincipal princip
     }
     var items = await query.OrderByDescending(x => x.UpdatedAt).Take(100)
         .Select(x => new { x.Id, x.BrandId, x.Title, x.Content, x.Channel, x.Tone, x.Status, x.AiModel,
-            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, VersionCount = x.Versions.Count })
+            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, x.ScheduledAt, x.PublishedAt, x.PublishError, VersionCount = x.Versions.Count })
         .ToListAsync(ct);
     return Results.Ok(items);
 });
@@ -1177,7 +1179,7 @@ contentApi.MapGet("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
     var draft = await db.ContentDrafts.AsNoTracking()
         .Where(x => x.Id == draftId && x.OrganizationId == organizationId)
         .Select(x => new { x.Id, x.BrandId, x.Title, x.Content, x.Channel, x.Tone, x.Status, x.Prompt, x.AiModel,
-            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, Versions = x.Versions.OrderByDescending(v => v.VersionNumber)
+            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, x.ScheduledAt, x.PublishedAt, x.PublishError, Versions = x.Versions.OrderByDescending(v => v.VersionNumber)
                 .Select(v => new { v.Id, v.VersionNumber, v.Title, v.Content, v.ChangeNote, v.CreatedAt }).ToList() })
         .SingleOrDefaultAsync(ct);
     return draft is null ? Results.NotFound() : Results.Ok(draft);
