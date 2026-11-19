@@ -2227,9 +2227,40 @@ automationApi.MapGet("/runs", async (Guid organizationId, ClaimsPrincipal princi
         .OrderByDescending(x => x.CreatedAt).Take(limit)
         .Join(db.AutomationRules.AsNoTracking(), run => run.RuleId, rule => rule.Id,
             (run, rule) => new { run.Id, run.RuleId, ruleName = rule.Name, run.Trigger, run.SubjectType,
-                run.SubjectId, run.Status, run.Result, run.Error, run.CreatedAt, run.StartedAt, run.CompletedAt })
+                run.SubjectId, run.Status, run.Result, run.Error, run.AttemptCount, maxAttempts = 3, run.CreatedAt, run.StartedAt, run.CompletedAt })
         .ToListAsync(ct);
     return Results.Ok(runs);
+});
+
+automationApi.MapPost("/runs/{runId:guid}/retry", async (Guid organizationId, Guid runId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+
+    var run = await db.AutomationRuns.SingleOrDefaultAsync(x => x.Id == runId && x.OrganizationId == organizationId, ct);
+    if (run is null) return Results.NotFound();
+    if (run.Status != "Failed")
+        return Results.Conflict(new { error = "فقط اجرای ناموفق را می‌توان دوباره به صف فرستاد." });
+    if (run.AttemptCount >= 3)
+        return Results.Conflict(new { error = "سقف سه تلاش برای این اجرا تکمیل شده است؛ برای جلوگیری از حلقه تکرار، اجرای مجدد مجاز نیست." });
+    var rule = await db.AutomationRules.SingleOrDefaultAsync(x => x.Id == run.RuleId && x.OrganizationId == organizationId, ct);
+    if (rule is null || !rule.IsEnabled)
+        return Results.Conflict(new { error = "قانون حذف یا غیرفعال است؛ ابتدا آن را فعال کنید." });
+
+    run.Status = "Pending";
+    run.Error = null;
+    run.Result = null;
+    run.StartedAt = null;
+    run.CompletedAt = null;
+    run.CreatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "automation.run_retried", "AutomationRun", run.Id,
+        $"اجرای گردش‌کار «{rule.Name}» برای تلاش بعدی به صف بازگردانده شد.", new { attemptCount = run.AttemptCount, maxAttempts = 3 });
+    await db.SaveChangesAsync(ct);
+    return Results.Accepted($"/api/organizations/{organizationId}/automations/runs", new { run.Id, run.Status, run.AttemptCount, maxAttempts = 3 });
 });
 
 var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
