@@ -539,7 +539,7 @@ crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, Cla
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var title = request.Title?.Trim();
-    var stage = request.Stage?.Trim() ?? "New";
+    var stage = request.Stage?.Trim() ?? "new";
     if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || !await IsAllowedConfiguredStatus(db, organizationId, "crm.lead", stage, leadStages, ct) ||
         request.EstimatedValue < 0 || (request.Source?.Length ?? 0) > 120 || (request.Notes?.Length ?? 0) > 4000)
         return Results.BadRequest(new { error = "عنوان، مرحله یا مبلغ فرصت فروش معتبر نیست." });
@@ -649,7 +649,7 @@ campaignsApi.MapPost("/", async (Guid organizationId, CampaignRequest request, C
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
-    var name = request.Name?.Trim(); var channel = request.Channel?.Trim(); var status = request.Status?.Trim() ?? "Draft";
+    var name = request.Name?.Trim(); var channel = request.Channel?.Trim(); var status = request.Status?.Trim() ?? "draft";
     if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || channel is null || !campaignChannels.Contains(channel) ||
         !await IsAllowedConfiguredStatus(db, organizationId, "campaign", status, campaignStatuses, ct) || request.Budget < 0 || request.Budget > 9999999999999999m ||
         (request.Objective?.Length ?? 0) > 1000 || (request.Notes?.Length ?? 0) > 4000 ||
