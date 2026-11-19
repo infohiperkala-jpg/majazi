@@ -1043,6 +1043,43 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
 
 var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
 
+var growthAgentApi = app.MapGroup("/api/organizations/{organizationId:guid}/growth-agent").RequireAuthorization();
+
+growthAgentApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var org = await db.Organizations.AsNoTracking().Where(x => x.Id == organizationId)
+        .Select(x => new { x.GrowthAgentEnabled, x.GrowthAgentLastRunAt }).SingleOrDefaultAsync(ct);
+    if (org is null) return Results.NotFound();
+    return Results.Ok(new {
+        enabled = org.GrowthAgentEnabled,
+        lastRunAt = org.GrowthAgentLastRunAt,
+        aiConfigured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) && !string.IsNullOrWhiteSpace(config["AI:Model"]),
+        cadence = "daily",
+        execution = "server-background-worker",
+        autoPublishing = false
+    });
+});
+
+growthAgentApi.MapPut("/", async (Guid organizationId, GrowthAgentSettingsRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var org = await db.Organizations.SingleOrDefaultAsync(x => x.Id == organizationId, ct);
+    if (org is null) return Results.NotFound();
+    org.GrowthAgentEnabled = request.Enabled;
+    if (request.Enabled) org.GrowthAgentLastRunAt = null;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { enabled = org.GrowthAgentEnabled, message = request.Enabled
+        ? "عامل رشد فعال شد؛ اولین برنامه در چرخه پس‌زمینه بعدی تولید می‌شود."
+        : "عامل رشد متوقف شد؛ برنامه‌های قبلی و داده‌ها حفظ شدند." });
+});
+
+
 contentApi.MapGet("/ai/status", (IConfiguration config) => Results.Ok(new
 {
     configured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) &&
@@ -1647,3 +1684,5 @@ public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId);
 
 
 public sealed record ContentApprovalRequest(string? Comment);
+
+public sealed record GrowthAgentSettingsRequest(bool Enabled);
