@@ -194,6 +194,7 @@ public sealed class ContentDraft
     public string? WhatsAppTemplateName { get; set; }
     public string? WhatsAppTemplateLanguage { get; set; }
     public string? WhatsAppTemplateParametersJson { get; set; }
+    public string? WhatsAppTemplateComponentsJson { get; set; }
     public ICollection<ContentDraftVersion> Versions { get; set; } = new List<ContentDraftVersion>();
 }
 
