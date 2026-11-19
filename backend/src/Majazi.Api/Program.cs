@@ -3143,6 +3143,13 @@ contentApi.MapPost("/drafts/{draftId:guid}/attachment", async (Guid organization
     attachment.Size = file.Length;
     attachment.Data = stream.ToArray();
     attachment.CreatedAt = DateTimeOffset.UtcNow;
+    if (draft.Status is "InReview" or "Approved" or "PublishFailed")
+    {
+        draft.Status = "Draft";
+        draft.ApprovalRound++;
+        draft.ApprovedAt = null;
+        draft.ApprovedByUserId = null;
+    }
     draft.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { attachment.Id, attachment.FileName, attachment.ContentType, attachment.Size, attachment.CreatedAt });
@@ -3160,6 +3167,13 @@ contentApi.MapDelete("/drafts/{draftId:guid}/attachment", async (Guid organizati
     var attachment = await db.ContentDraftAttachments.SingleOrDefaultAsync(x => x.DraftId == draftId, ct);
     if (attachment is null) return Results.NotFound();
     db.ContentDraftAttachments.Remove(attachment);
+    if (draft.Status is "InReview" or "Approved" or "PublishFailed")
+    {
+        draft.Status = "Draft";
+        draft.ApprovalRound++;
+        draft.ApprovedAt = null;
+        draft.ApprovedByUserId = null;
+    }
     draft.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
