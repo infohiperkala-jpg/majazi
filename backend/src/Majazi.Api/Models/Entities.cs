@@ -183,6 +183,11 @@ public sealed class ContentDraft
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ApprovedAt { get; set; }
     public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ScheduledAt { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+    public Guid? PublishConnectionId { get; set; }
+    public string? PublishTarget { get; set; }
+    public string? PublishError { get; set; }
     public ICollection<ContentDraftVersion> Versions { get; set; } = new List<ContentDraftVersion>();
 }
 
