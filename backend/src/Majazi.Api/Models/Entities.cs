@@ -277,6 +277,7 @@ public sealed class AutomationRun
     public string Status { get; set; } = "Pending";
     public string? Result { get; set; }
     public string? Error { get; set; }
+    public int AttemptCount { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
