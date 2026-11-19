@@ -64,7 +64,7 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
                     if (contact is null && lead is null && draft is null) throw new InvalidOperationException("رکورد محرک دیگر در سازمان وجود ندارد.");
                     if (draft is not null && (draft.Status != "Approved" || rule.Trigger != "ContentApproved"))
                         throw new InvalidOperationException("محتوا دیگر در وضعیت تأیید نهایی نیست.");
-                    if (!Matches(rule, contact, lead))
+                    if (!Matches(rule, contact, lead, draft))
                     {
                         run.Status = "Skipped"; run.Result = "شرط قانون برقرار نبود.";
                     }
@@ -106,7 +106,7 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
         }
     }
 
-    private static bool Matches(AutomationRule rule, CrmContact? contact, CrmLead? lead)
+    private static bool Matches(AutomationRule rule, CrmContact? contact, CrmLead? lead, ContentDraft? draft)
     {
         if (rule.ConditionField == "Any" || string.IsNullOrWhiteSpace(rule.ConditionValue)) return true;
         var actual = rule.ConditionField switch
@@ -114,6 +114,8 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
             "LeadStage" => lead?.Stage,
             "LeadSource" => lead?.Source,
             "ContactCompany" => contact?.Company,
+            "ContentChannel" => draft?.Channel,
+            "ContentTitle" => draft?.Title,
             _ => null
         };
         if (actual is null) return false;
