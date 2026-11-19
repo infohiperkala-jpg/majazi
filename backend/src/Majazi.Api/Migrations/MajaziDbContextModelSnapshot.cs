@@ -452,8 +452,6 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
             b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
-            b.Property<bool>("GrowthAgentEnabled").HasColumnType("boolean");
-            b.Property<DateTimeOffset?>("GrowthAgentLastRunAt").HasColumnType("timestamp with time zone");
             b.Property<string>("Name").IsRequired().HasMaxLength(180).HasColumnType("character varying(180)");
             b.Property<Guid>("OrganizationId").HasColumnType("uuid");
             b.Property<string>("Slug").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
@@ -466,6 +464,8 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
             b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<bool>("GrowthAgentEnabled").HasColumnType("boolean");
+            b.Property<DateTimeOffset?>("GrowthAgentLastRunAt").HasColumnType("timestamp with time zone");
             b.Property<string>("Name").IsRequired().HasMaxLength(180).HasColumnType("character varying(180)");
             b.Property<string>("Slug").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
             b.HasKey("Id");
