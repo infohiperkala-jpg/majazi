@@ -903,8 +903,10 @@ ordersApi.MapPost("/{orderId:guid}/payments", async (Guid organizationId, Guid o
         CreatedByUserId = userId.Value
     };
     db.PaymentTransactions.Add(payment);
+    order.Version++; order.UpdatedAt = DateTimeOffset.UtcNow;
     RecordAuditEvent(db, organizationId, userId.Value, "order.payment_recorded", "PaymentTransaction", payment.Id, "رویداد مالی سفارش ثبت شد.", new { payment.Amount, payment.Method, payment.Status });
-    await db.SaveChangesAsync(ct);
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "سفارش هم‌زمان به‌روزرسانی شده است؛ مانده را تازه‌سازی کنید." }); }
     return Results.Created($"/api/organizations/{organizationId}/orders/{orderId}", new { payment.Id, payment.Amount, payment.Method, payment.Status, payment.PaidAt, payment.CreatedAt });
 });
 
