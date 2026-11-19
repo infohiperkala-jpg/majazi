@@ -17,6 +17,14 @@
 
 برای سرویس‌های خارجی، مسیر خروجی HTTP(S) جداگانه و اختیاری قابل تنظیم است: `NETWORK_INTERNATIONAL_DEFAULT_PROXY` یا پراکسی اختصاصی `NETWORK_TELEGRAM_PROXY`، `NETWORK_META_PROXY` و `NETWORK_AI_PROXY`. این تنظیم فقط به کلاینت‌های خارجی مربوط است؛ سرویس‌های ایرانی باید با مسیر مستقیم و بدون پراکسی خارجی پیاده‌سازی شوند. این قابلیت VPN نصب نمی‌کند و به پراکسی/VPN قابل‌دسترسی از داخل کانتینر API نیاز دارد. اطلاعات محرمانه پراکسی را در `.env` سرور نگه دارید و در Git یا گفتگو ارسال نکنید.\n\nAPI هنگام راه‌اندازی، Migrationهای EF Core را روی PostgreSQL اعمال می‌کند. ثبت‌نام اولیه با ایمیل، گذرواژه قوی و نام سازمان انجام می‌شود؛ کاربر ثبت‌نام‌کننده مالک سازمان خواهد بود. ورود با ایمیل و گذرواژه، JWT یک‌ساعته صادر می‌کند. دسترسی به اطلاعات سازمان و CRM بر اساس عضویت همان سازمان کنترل می‌شود.
 
+## Iranian bot channels: Bale and Rubika
+- **Bale:** create a bot with Bale BotFather and store its bot token as the channel credential. The adapter uses the Bale Bot API `getMe`, `sendMessage`, and `setWebhook` methods at `https://tapi.bale.ai/bot{TOKEN}/{METHOD}`.
+- **Rubika:** create a bot using the Rubika bot platform and store its bot token as the channel credential. The adapter uses the Rubika Bot API `getMe`, `sendMessage`, and `updateBotEndpoints` methods at `https://botapi.rubika.ir/v3/{TOKEN}/{METHOD}`; Rubika responses use the `status/data` envelope.
+- In Channels, add the bot, run **Live connection test**, **Verify bot**, then **Activate incoming messages**. The API server must have `PUBLIC_BASE_URL` set to the public HTTPS origin. Webhook URLs are signed per connection and are not shared between organizations.
+- Incoming text messages create Inbox conversations and trigger the existing `InboxMessageReceived` automation. Duplicate provider message IDs are ignored. Text replies are sent through each provider's Bot API.
+- The first adapter scope is text messaging. Media upload/download, channel-wide broadcasts, and provider-specific advanced controls are not implied by this connection.
+
+
 ## Instagram Messaging and Facebook Messenger
 - Instagram Business Login requests `instagram_business_manage_messages` in addition to the existing account/content scopes. The account must be eligible for Instagram Messaging and the Meta app must have the required access/review for production users.
 - Facebook Messenger is connected by registering the Facebook Page ID and its Page Access Token with `pages_messaging` permission. Use a Page token for a Page where the app has messaging task access; do not use a user token.
