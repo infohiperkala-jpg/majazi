@@ -49,6 +49,22 @@ export default function GrowthPage(){
  useEffect(()=>{if(!token||!orgId)return;fetch("/backend-api/api/organizations/"+orgId+"/channels",{headers:{Authorization:"Bearer "+token},cache:"no-store"}).then(r=>r.ok?r.json():[]).then(setChannels).catch(()=>setError("وضعیت اتصال کانال‌ها دریافت نشد."));},[token,orgId]);
  useEffect(()=>{if(!token||!orgId)return;fetch("/backend-api/api/organizations/"+orgId+"/growth-agent",{headers:{Authorization:"Bearer "+token},cache:"no-store"}).then(async r=>{if(!r.ok)throw new Error();return r.json();}).then(setAgent).catch(()=>setAgent(null));},[token,orgId]);
  useEffect(()=>{if(!token||!orgId)return;fetch("/backend-api/api/organizations/"+orgId+"/growth-agent/latest-plan",{headers:{Authorization:"Bearer "+token},cache:"no-store"}).then(r=>r.status===404?null:r.ok?r.json():Promise.reject()).then(setLatestPlan).catch(()=>setLatestPlan(null));},[token,orgId]);
+ useEffect(()=>{
+  if(!token||!orgId)return;
+  const refresh=async()=>{
+   const headers={Authorization:"Bearer "+token};
+   const [agentResponse,planResponse,channelResponse]=await Promise.all([
+    fetch("/backend-api/api/organizations/"+orgId+"/growth-agent",{headers,cache:"no-store"}),
+    fetch("/backend-api/api/organizations/"+orgId+"/growth-agent/latest-plan",{headers,cache:"no-store"}),
+    fetch("/backend-api/api/organizations/"+orgId+"/channels",{headers,cache:"no-store"})
+   ]);
+   if(agentResponse.ok)setAgent(await agentResponse.json());
+   if(planResponse.ok)setLatestPlan(await planResponse.json());else if(planResponse.status===404)setLatestPlan(null);
+   if(channelResponse.ok)setChannels(await channelResponse.json());
+  };
+  const timer=window.setInterval(()=>{void refresh().catch(()=>{});},30000);
+  return()=>window.clearInterval(timer);
+ },[token,orgId]);
  async function toggleAgent(){if(!agent||!orgId)return;setAgentBusy(true);setError("");try{const r=await fetch("/backend-api/api/organizations/"+orgId+"/growth-agent",{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({enabled:!agent.enabled})});const data=await r.json();if(!r.ok)throw new Error(data.error||"تغییر وضعیت عامل رشد ناموفق بود.");const refreshed=await fetch("/backend-api/api/organizations/"+orgId+"/growth-agent",{headers:{Authorization:"Bearer "+token},cache:"no-store"});if(refreshed.ok)setAgent(await refreshed.json());}catch(e){setError(e instanceof Error?e.message:"خطا در تنظیم عامل رشد");}finally{setAgentBusy(false);}}
  const filtered=useMemo(()=>platforms.filter(p=>(region==="همه"||p.region===region)&&((p.name+" "+p.category).toLowerCase().includes(search.toLowerCase()))),[region,search]);
  const active=platforms.find(p=>p.id===selected)??platforms[0];const connected=channels.filter(c=>c.provider===active.id&&c.status==="Connected");
