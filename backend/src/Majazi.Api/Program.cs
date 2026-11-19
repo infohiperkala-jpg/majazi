@@ -2883,7 +2883,11 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
         x.Id == request.ConnectionId && x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected", ct);
     if (connection is null || string.IsNullOrWhiteSpace(connection.EncryptedAccessToken))
-        return Results.BadRequest(new { error = "اتصال فعال تلگرام انتخاب نشده است." });
+        return Results.BadRequest(new { error = "اتصال فعال پیام‌رسان انتخاب نشده است." });
+    if (connection.Provider == "Telegram" && !IsValidTelegramChatTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شناسه مقصد تلگرام معتبر نیست." });
+    if (connection.Provider == "Eitaa" && !IsValidEitaaTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شناسه مقصد ایتا معتبر نیست." });
     if (draft.Channel != connection.Provider) return Results.BadRequest(new { error = "پلتفرم محتوا باید با پلتفرم اتصال انتخاب‌شده یکسان باشد." });
     draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
@@ -2910,6 +2914,10 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
         x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected", ct);
     if (connection is null || connection.Provider != draft.Channel) return Results.BadRequest(new { error = "اتصال فعال هم‌نوع با پلتفرم محتوا یافت نشد." });
+    if (connection.Provider == "Telegram" && !IsValidTelegramChatTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شناسه مقصد تلگرام معتبر نیست." });
+    if (connection.Provider == "Eitaa" && !IsValidEitaaTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شناسه مقصد ایتا معتبر نیست." });
     draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
     draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
