@@ -34,6 +34,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasKey("Id");
             b.HasIndex("OrganizationId", "OrderNumber").IsUnique();
             b.HasIndex("OrganizationId", "Status", "CreatedAt");
+            b.HasIndex("ContactId");
             b.ToTable("sales_orders", (string)null);
         });
 
