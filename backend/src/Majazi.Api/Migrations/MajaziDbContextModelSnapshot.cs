@@ -14,6 +14,62 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.SalesOrder", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid?>("ContactId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<string>("Currency").IsRequired().HasMaxLength(3).HasColumnType("character varying(3)");
+            b.Property<decimal>("Discount").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<string>("Notes").HasMaxLength(4000).HasColumnType("character varying(4000)");
+            b.Property<string>("OrderNumber").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Status").IsRequired().HasMaxLength(24).HasColumnType("character varying(24)");
+            b.Property<decimal>("Subtotal").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<decimal>("Tax").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<decimal>("Total").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.Property<int>("Version").IsConcurrencyToken().HasColumnType("integer");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "OrderNumber").IsUnique();
+            b.HasIndex("OrganizationId", "Status", "CreatedAt");
+            b.ToTable("sales_orders", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.SalesOrderLine", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<decimal>("Discount").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<decimal>("LineTotal").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<string>("Name").IsRequired().HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<Guid>("OrderId").HasColumnType("uuid");
+            b.Property<int>("SortOrder").HasColumnType("integer");
+            b.Property<string>("Sku").HasMaxLength(100).HasColumnType("character varying(100)");
+            b.Property<decimal>("Quantity").HasPrecision(18, 3).HasColumnType("numeric(18,3)");
+            b.Property<decimal>("UnitPrice").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.HasKey("Id");
+            b.HasIndex("OrderId", "SortOrder");
+            b.ToTable("sales_order_lines", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.PaymentTransaction", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<decimal>("Amount").HasPrecision(18, 2).HasColumnType("numeric(18,2)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<string>("Method").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<string>("Note").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<DateTimeOffset?>("PaidAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Reference").HasMaxLength(180).HasColumnType("character varying(180)");
+            b.Property<string>("Status").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
+            b.Property<Guid>("OrderId").HasColumnType("uuid");
+            b.HasKey("Id");
+            b.HasIndex("OrderId", "CreatedAt");
+            b.ToTable("payment_transactions", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.OrganizationAiProviderSetting", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -67,6 +123,20 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasIndex("OrganizationId", "Slug").IsUnique();
             b.HasIndex("OrganizationId", "Status", "UpdatedAt");
             b.ToTable("knowledge_articles", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.SalesOrder", b =>
+        {
+            b.HasOne("Majazi.Api.Models.CrmContact", null).WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+        modelBuilder.Entity("Majazi.Api.Models.SalesOrderLine", b =>
+        {
+            b.HasOne("Majazi.Api.Models.SalesOrder", null).WithMany().HasForeignKey("OrderId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+        modelBuilder.Entity("Majazi.Api.Models.PaymentTransaction", b =>
+        {
+            b.HasOne("Majazi.Api.Models.SalesOrder", null).WithMany().HasForeignKey("OrderId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
 
         modelBuilder.Entity("Majazi.Api.Models.OrganizationAiProviderSetting", b =>
