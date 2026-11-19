@@ -8,6 +8,7 @@ type Draft = { module: string; key: string; label: string; color: string; descri
 const modules = [
   { value: "crm.lead", label: "مراحل سرنخ فروش" },
   { value: "campaign", label: "وضعیت کمپین" },
+  { value: "inbox.conversation", label: "وضعیت مکالمه‌های صندوق ورودی" },
 ];
 const emptyDraft: Draft = { module: "crm.lead", key: "", label: "", color: "#64748b", description: "", sortOrder: 0, isActive: true };
 
