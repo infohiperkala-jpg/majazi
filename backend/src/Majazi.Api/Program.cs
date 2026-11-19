@@ -908,6 +908,38 @@ ordersApi.MapPost("/{orderId:guid}/payments", async (Guid organizationId, Guid o
     return Results.Created($"/api/organizations/{organizationId}/orders/{orderId}", new { payment.Id, payment.Amount, payment.Method, payment.Status, payment.PaidAt, payment.CreatedAt });
 });
 
+ordersApi.MapPatch("/{orderId:guid}/payments/{paymentId:guid}/status", async (Guid organizationId, Guid orderId, Guid paymentId,
+    PaymentStatusUpdateRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var order = await db.SalesOrders.SingleOrDefaultAsync(x => x.Id == orderId && x.OrganizationId == organizationId, ct);
+    if (order is null) return Results.NotFound();
+    var payment = await db.PaymentTransactions.SingleOrDefaultAsync(x => x.Id == paymentId && x.OrderId == orderId, ct);
+    if (payment is null) return Results.NotFound();
+    var next = request.Status?.Trim();
+    if (payment.Status != "Pending" || next is not ("Paid" or "Failed") || order.Status is "Draft" or "Cancelled")
+        return Results.Conflict(new { error = "فقط پرداخت در انتظار را می‌توان به پرداخت‌شده یا ناموفق تغییر داد." });
+    if (next == "Paid")
+    {
+        var paid = await db.PaymentTransactions.Where(x => x.OrderId == orderId && x.Status == "Paid")
+            .SumAsync(x => (decimal?)x.Amount, ct) ?? 0;
+        var refunded = await db.PaymentTransactions.Where(x => x.OrderId == orderId && x.Status == "Refunded")
+            .SumAsync(x => (decimal?)x.Amount, ct) ?? 0;
+        if (payment.Amount > order.Total - paid + refunded)
+            return Results.BadRequest(new { error = "با ثبت این پرداخت، مجموع پرداخت‌ها از مبلغ سفارش بیشتر می‌شود." });
+        payment.PaidAt = DateTimeOffset.UtcNow;
+    }
+    payment.Status = next;
+    order.Version++;
+    order.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "order.payment_status_changed", "PaymentTransaction", payment.Id,
+        "وضعیت رویداد پرداخت تغییر کرد.", new { previous = "Pending", next, payment.Amount });
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "سفارش هم‌زمان تغییر کرده است؛ اطلاعات را تازه‌سازی کنید." }); }
+    return Results.Ok(new { payment.Id, payment.Amount, payment.Status, payment.PaidAt, order.Version });
+});
+
 ordersApi.MapDelete("/{orderId:guid}", async (Guid organizationId, Guid orderId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -2978,4 +3010,5 @@ public sealed record SalesOrderLineRequest(string? Name, string? Sku, decimal Qu
 public sealed record SalesOrderRequest(Guid? ContactId, string? Currency, decimal Discount, decimal Tax, string? Notes, List<SalesOrderLineRequest>? Lines, int Version = 0);
 public sealed record SalesOrderStatusRequest(string? Status);
 public sealed record PaymentTransactionRequest(decimal Amount, string? Method, string? Status, string? Reference, string? Note);
+public sealed record PaymentStatusUpdateRequest(string? Status);
 public sealed record AiProviderConfig(string? ApiKey, string? BaseUrl, string? Model, bool Enabled, bool OrganizationConfigured);
