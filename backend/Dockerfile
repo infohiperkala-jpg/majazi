@@ -8,7 +8,7 @@ RUN dotnet restore src/Majazi.Api/Majazi.Api.csproj
 RUN dotnet publish src/Majazi.Api/Majazi.Api.csproj -c Release -o /app/publish --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
-RUN apt-get update && apt-get install -y --no-install-recommends libkrb5-3 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libkrb5-3 libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/publish .
 ENV ASPNETCORE_URLS=http://+:8080
