@@ -1319,7 +1319,8 @@ aiApi.MapPost("/generate-text", async (Guid organizationId, GenerateAssistantTex
         ["crm"] = ["contact.notes", "lead.notes", "activity.summary"],
         ["campaign"] = ["objective", "notes"],
         ["inbox"] = ["conversation.subject", "message.reply"],
-        ["content"] = ["title", "body", "description"]
+        ["content"] = ["title", "body", "description"],
+        ["knowledge"] = ["article.summary", "article.body"]
     };
     if (module is null || field is null || !allowed.TryGetValue(module, out var fields) || !fields.Contains(field) ||
         string.IsNullOrWhiteSpace(context) || context.Length > 1500 || (currentText?.Length ?? 0) > 5000 ||
@@ -1374,7 +1375,9 @@ var defaultTextTemplates = new Dictionary<string, (string Name, string Content)[
     ["inbox|message.reply"] = [("پاسخ اولیه پشتیبانی", "سلام، پیام شما دریافت شد. برای بررسی دقیق‌تر، لطفاً [اطلاعات تکمیلی موردنیاز] را ارسال کنید. پس از بررسی، نتیجه را اطلاع می‌دهیم.")],
     ["content|title"] = [("عنوان معرفی محصول", "معرفی [نام محصول]؛ راهکاری برای [نیاز مخاطب]")],
     ["content|body"] = [("متن معرفی محصول", "[نام محصول/خدمت] برای افرادی طراحی شده است که به [نیاز اصلی] اهمیت می‌دهند. ویژگی‌های مهم: [ویژگی‌ها]. برای دریافت اطلاعات بیشتر، [دعوت به اقدام].")],
-    ["content|description"] = [("توضیح کوتاه", "[نام محصول/خدمت] با تمرکز بر [مزیت اصلی] به شما کمک می‌کند [نتیجه مورد انتظار]. برای آشنایی بیشتر با جزئیات و شرایط، با ما در ارتباط باشید.")]
+    ["content|description"] = [("توضیح کوتاه", "[نام محصول/خدمت] با تمرکز بر [مزیت اصلی] به شما کمک می‌کند [نتیجه مورد انتظار]. برای آشنایی بیشتر با جزئیات و شرایط، با ما در ارتباط باشید.")],
+    ["knowledge|article.summary"] = [("خلاصه مستند", "هدف این سند: [هدف]. مخاطبان: [گروه هدف]. نکات کلیدی: [موارد اصلی]. نتیجه مورد انتظار: [نتیجه].")],
+    ["knowledge|article.body"] = [("ساختار راهنمای اجرایی", "## هدف\n[هدف و دامنه سند]\n\n## مسئولیت‌ها\n[نقش‌ها و مسئولیت‌ها]\n\n## مراحل اجرا\n1. [مرحله اول]\n2. [مرحله دوم]\n3. [مرحله سوم]\n\n## کنترل کیفیت\n[معیارها و چک‌لیست]\n\n## منابع و نکات تکمیلی\n[منابع معتبر و نکات مهم]")]
 };
 
 var templatesApi = app.MapGroup("/api/organizations/{organizationId:guid}/text-templates").RequireAuthorization();

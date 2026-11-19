@@ -10,8 +10,9 @@ const fieldsByModule: Record<string, { value: string; label: string }[]> = {
   campaign: [{ value: "objective", label: "هدف کمپین" }, { value: "notes", label: "یادداشت کمپین" }],
   inbox: [{ value: "conversation.subject", label: "عنوان مکالمه" }, { value: "message.reply", label: "پاسخ پیام" }],
   content: [{ value: "title", label: "عنوان محتوا" }, { value: "body", label: "متن محتوا" }, { value: "description", label: "توضیح محتوا" }],
+  knowledge: [{ value: "article.summary", label: "خلاصه مقاله" }, { value: "article.body", label: "متن مستند" }],
 };
-const moduleLabels: Record<string, string> = { crm: "مدیریت ارتباط با مشتری", campaign: "کمپین‌ها", inbox: "صندوق ورودی", content: "استودیوی محتوا" };
+const moduleLabels: Record<string, string> = { crm: "مدیریت ارتباط با مشتری", campaign: "کمپین‌ها", inbox: "صندوق ورودی", content: "استودیوی محتوا", knowledge: "مرکز دانش" };
 const emptyDraft: Draft = { name: "", content: "", sortOrder: 10, isActive: true };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
