@@ -1200,7 +1200,7 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
 });
 
 
-var channelProviders = new HashSet<string>(["Instagram", "Telegram"]);
+var channelProviders = new HashSet<string>(["Instagram", "Telegram", "WhatsApp"]);
 channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -1379,8 +1379,16 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
         if (item.Provider == "Telegram") endpoint = $"https://api.telegram.org/bot{credential}/getMe";
         else if (item.Provider == "Instagram") endpoint = QueryHelpers.AddQueryString("https://graph.instagram.com/me",
             new Dictionary<string, string?> { ["fields"] = "id,user_id,username", ["access_token"] = credential });
+        else if (item.Provider == "WhatsApp")
+        {
+            if (string.IsNullOrWhiteSpace(item.ExternalAccountId)) return Results.Conflict(new { error = "برای WhatsApp باید Phone Number ID ثبت شود." });
+            var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+            endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,display_phone_number,verified_name";
+        }
         else return Results.Conflict(new { error = "برای این پلتفرم هنوز آداپتور رسمی بررسی سلامت پیاده‌سازی نشده است." });
-        using var response = await clients.CreateClient(item.Provider == "Telegram" ? "TelegramBotApi" : "MetaOAuth").GetAsync(endpoint, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        if (item.Provider == "WhatsApp") request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
+        using var response = await clients.CreateClient(item.Provider == "Telegram" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
         using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = payload.RootElement;
         var providerOk = response.IsSuccessStatusCode &&
@@ -1398,7 +1406,7 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
         }
         var result = root.TryGetProperty("result", out var telegramResult) ? telegramResult : root;
         if (result.TryGetProperty("id", out var externalId)) item.ExternalAccountId = externalId.ToString();
-        var accountName = result.TryGetProperty("username", out var username) ? username.GetString() : item.DisplayName;
+        var accountName = result.TryGetProperty("username", out var username) ? username.GetString() : result.TryGetProperty("verified_name", out var verifiedName) ? verifiedName.GetString() : item.DisplayName;
         item.Status = "Connected";
         item.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
