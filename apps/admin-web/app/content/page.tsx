@@ -9,7 +9,7 @@ type Brand={id:string;name:string};
 type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[]};
 type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
 type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
-type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
+type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};\ntype CalendarItem={id:string;title:string;channel:string;status:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null};
 async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
  const response=await fetch("/backend-api"+path,{...init,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token,...init?.headers},cache:"no-store"});
  const data=await response.json().catch(()=>null);
@@ -19,7 +19,7 @@ async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
 const statuses:Record<string,string>={Draft:"پیش‌نویس",Approved:"تأییدشده",Scheduled:"زمان‌بندی‌شده",Publishing:"در حال انتشار",Published:"منتشرشده",PublishFailed:"خطای انتشار"};
 export default function ContentStudioPage(){
  const [token,setToken]=useState("");const [orgs,setOrgs]=useState<Organization[]>([]);const [org,setOrg]=useState("");
- const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [selected,setSelected]=useState("");
+ const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [calendarItems,setCalendarItems]=useState<CalendarItem[]>([]);const [selected,setSelected]=useState("");
  const [detail,setDetail]=useState<Draft|null>(null);const [ai,setAi]=useState<AIStatus|null>(null);const [targets,setTargets]=useState<PublishTarget[]>([]);const [connectionId,setConnectionId]=useState("");const [targetChatId,setTargetChatId]=useState("");const [scheduledAt,setScheduledAt]=useState("");
  const [topic,setTopic]=useState("");const [brandId,setBrandId]=useState("");const [channel,setChannel]=useState("Instagram");const [tone,setTone]=useState("حرفه‌ای و متقاعدکننده");const [instructions,setInstructions]=useState("");
  const [title,setTitle]=useState("");const [content,setContent]=useState("");const [filter,setFilter]=useState("All");const [query,setQuery]=useState("");
@@ -91,6 +91,10 @@ export default function ContentStudioPage(){
   </section>
   {error&&<div className="studio-alert error" role="alert">{error}</div>}{notice&&<div className="studio-alert success" role="status">{notice}</div>}
   {!ai?.configured&&<section className="studio-config"><div><strong>اتصال مدل هوش مصنوعی</strong><p>برای تولید واقعی، متغیرهای امن AI__BaseUrl، AI__ApiKey و AI__Model را در محیط سرور تنظیم و API را راه‌اندازی مجدد کنید. کلید در پنل یا مرورگر نمایش داده نمی‌شود.</p></div><span>سازگار با OpenAI API</span></section>}
+  <section className="studio-library studio-calendar">
+   <div className="studio-section-title"><span>CONTENT OPERATIONS / CALENDAR</span><h2>تقویم انتشار</h2><p>برنامه انتشار ۳۰ روز گذشته تا ۹۰ روز آینده و سوابق انتشار</p></div>
+   <div className="studio-draft-list">{calendarItems.length===0?<div className="studio-no-drafts"><strong>رویدادی در این بازه وجود ندارد</strong><p>پس از تأیید محتوا و زمان‌بندی انتشار، رویدادها اینجا نمایش داده می‌شوند.</p></div>:calendarItems.map(item=><button key={item.id} className="studio-draft-row" onClick={()=>void run(()=>openDraft(item.id))}><span className="draft-channel">{item.channel}</span><span className="draft-main"><strong>{item.title}</strong><small>{item.publishedAt?"انتشار واقعی: "+new Date(item.publishedAt).toLocaleString("fa-IR"):item.scheduledAt?"زمان برنامه‌ریزی‌شده: "+new Date(item.scheduledAt).toLocaleString("fa-IR"):"بدون زمان ثبت‌شده"}</small></span><span className={"draft-status "+(item.status==="Published"?"approved":"")}>{statuses[item.status]??item.status}</span></button>)}</div>
+  </section>
   <section className="studio-grid">
    <aside className="studio-generator">
     <div className="studio-section-title"><span>01 / CREATE</span><h2>تولید محتوای جدید</h2><p>موضوع و هدف را مشخص کنید؛ خروجی مستقیماً در بانک محتوا ذخیره می‌شود.</p></div>
