@@ -3958,6 +3958,8 @@ static string? ValidateWhatsAppTemplate(string? name, string? language, string[]
         return "کد زبان قالب معتبر نیست؛ مانند en_US یا fa.";
     if (parameters is { Length: > 20 } || (parameters ?? Array.Empty<string>()).Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 1024))
         return "حداکثر ۲۰ پارامتر متنی غیرخالی با طول حداکثر ۱۰۲۴ نویسه برای قالب قابل ثبت است.";
+    if (JsonSerializer.Serialize(parameters ?? Array.Empty<string>()).Length > 4000)
+        return "حجم مجموع پارامترهای قالب بیش از حد مجاز است؛ متن متغیرها را کوتاه‌تر کنید.";
     if (hasAttachment)
         return "در این نسخه قالب‌های متنی با پیوست رسانه‌ای هم‌زمان پشتیبانی نمی‌شوند؛ پیوست را حذف کنید یا از پیام رسانه‌ای عادی استفاده کنید.";
     return null;
