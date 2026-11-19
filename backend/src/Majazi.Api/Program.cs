@@ -1257,7 +1257,7 @@ channelsApi.MapPost("/{connectionId:guid}/meta-webhook", async (Guid organizatio
         .Select(x => x.Role).SingleOrDefaultAsync(ct);
     if (role is not ("Owner" or "Admin")) return Results.Forbid();
     var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
-        x => x.Id == connectionId && x.OrganizationId == organizationId && x.Provider is "Instagram" or "Facebook", ct);
+        x => x.Id == connectionId && x.OrganizationId == organizationId && (x.Provider == "Instagram" || x.Provider == "Facebook"), ct);
     if (item is null) return Results.NotFound();
     if (item.Status != "Connected" || string.IsNullOrWhiteSpace(item.EncryptedAccessToken) ||
         string.IsNullOrWhiteSpace(item.ExternalAccountId))
