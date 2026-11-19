@@ -52,6 +52,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<string>("Trigger").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
             b.HasKey("Id");
             b.HasIndex("OrganizationId", "RuleId", "CreatedAt");
+            b.HasIndex("RuleId");
             b.HasIndex("Status", "CreatedAt");
             b.ToTable("automation_runs", (string)null);
         });
