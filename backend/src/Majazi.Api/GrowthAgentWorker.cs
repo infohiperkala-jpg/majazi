@@ -53,11 +53,11 @@ public sealed class GrowthAgentWorker(
                 var model = configuration["AI:Model"];
                 if (savedAi is not null)
                 {
-                    key = null;
+                    key = configuration["AI:ApiKey"];
                     if (!string.IsNullOrWhiteSpace(savedAi.EncryptedApiKey))
                     {
                         try { key = protection.CreateProtector("Majazi.AIProviderSettings.v1", id.ToString("N")).Unprotect(savedAi.EncryptedApiKey); }
-                        catch (CryptographicException) { key = null; }
+                        catch (CryptographicException) { key = configuration["AI:ApiKey"]; }
                     }
                     baseUrl = savedAi.BaseUrl;
                     model = savedAi.Model;
