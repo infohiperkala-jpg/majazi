@@ -61,19 +61,26 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
                     var draft = run.SubjectType == "ContentDraft"
                         ? await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == run.SubjectId && x.OrganizationId == run.OrganizationId, ct)
                         : null;
-                    if (contact is null && lead is null && draft is null) throw new InvalidOperationException("رکورد محرک دیگر در سازمان وجود ندارد.");
+                    var inboxMessage = run.SubjectType == "InboxMessage"
+                        ? await db.InboxMessages.Include(x => x.Conversation).ThenInclude(x => x!.Contact)
+                            .SingleOrDefaultAsync(x => x.Id == run.SubjectId && x.Conversation!.OrganizationId == run.OrganizationId, ct)
+                        : null;
+                    contact ??= inboxMessage?.Conversation?.Contact;
+                    if (contact is null && lead is null && draft is null && inboxMessage is null) throw new InvalidOperationException("رکورد محرک دیگر در سازمان وجود ندارد.");
+                    if (inboxMessage is not null && (inboxMessage.Direction != "Inbound" || rule.Trigger != "InboxMessageReceived"))
+                        throw new InvalidOperationException("پیام ورودی معتبر نیست یا محرک قانون تغییر کرده است.");
                     if (draft is not null && (draft.Status != "Approved" || rule.Trigger != "ContentApproved"))
                         throw new InvalidOperationException("محتوا دیگر در وضعیت تأیید نهایی نیست.");
-                    if (!Matches(rule, contact, lead, draft))
+                    if (!Matches(rule, contact, lead, draft, inboxMessage))
                     {
                         run.Status = "Skipped"; run.Result = "شرط قانون برقرار نبود.";
                     }
                     else if (rule.ActionType == "CreateActivity")
                     {
-                        var summary = Expand(rule.ActionValue, contact, lead, draft);
+                        var summary = Expand(rule.ActionValue, contact, lead, draft, inboxMessage);
                         var activity = new CrmActivity
                         {
-                            OrganizationId = run.OrganizationId, ContactId = contact?.Id ?? lead?.ContactId,
+                            OrganizationId = run.OrganizationId, ContactId = contact?.Id ?? lead?.ContactId ?? inboxMessage?.Conversation?.ContactId,
                             LeadId = lead?.Id, CreatedByUserId = rule.CreatedByUserId,
                             ActivityType = rule.ActivityType ?? "Task", Summary = summary
                         };
@@ -106,7 +113,7 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
         }
     }
 
-    private static bool Matches(AutomationRule rule, CrmContact? contact, CrmLead? lead, ContentDraft? draft)
+    private static bool Matches(AutomationRule rule, CrmContact? contact, CrmLead? lead, ContentDraft? draft, InboxMessage? inboxMessage)
     {
         if (rule.ConditionField == "Any" || string.IsNullOrWhiteSpace(rule.ConditionValue)) return true;
         var actual = rule.ConditionField switch
@@ -116,6 +123,7 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
             "ContactCompany" => contact?.Company,
             "ContentChannel" => draft?.Channel,
             "ContentTitle" => draft?.Title,
+            "MessageBody" => inboxMessage?.Body,
             _ => null
         };
         if (actual is null) return false;
@@ -124,11 +132,13 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
             : string.Equals(actual, rule.ConditionValue, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string Expand(string template, CrmContact? contact, CrmLead? lead, ContentDraft? draft) => template
+    private static string Expand(string template, CrmContact? contact, CrmLead? lead, ContentDraft? draft, InboxMessage? inboxMessage) => template
         .Replace("{contactName}", contact?.FullName ?? "", StringComparison.OrdinalIgnoreCase)
         .Replace("{leadTitle}", lead?.Title ?? "", StringComparison.OrdinalIgnoreCase)
         .Replace("{leadStage}", lead?.Stage ?? "", StringComparison.OrdinalIgnoreCase)
         .Replace("{leadSource}", lead?.Source ?? "", StringComparison.OrdinalIgnoreCase)
         .Replace("{contentTitle}", draft?.Title ?? "", StringComparison.OrdinalIgnoreCase)
-        .Replace("{contentChannel}", draft?.Channel ?? "", StringComparison.OrdinalIgnoreCase);
+        .Replace("{contentChannel}", draft?.Channel ?? "", StringComparison.OrdinalIgnoreCase)
+        .Replace("{messageBody}", inboxMessage?.Body ?? "", StringComparison.OrdinalIgnoreCase)
+        .Replace("{conversationSubject}", inboxMessage?.Conversation?.Subject ?? "", StringComparison.OrdinalIgnoreCase);
 }
