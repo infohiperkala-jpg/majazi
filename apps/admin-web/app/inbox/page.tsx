@@ -62,8 +62,8 @@ export default function InboxPage() {
   async function send(e:FormEvent<HTMLFormElement>) {
     e.preventDefault();
     await run(async()=>{
-      await api("/api/organizations/"+organizationId+"/inbox/conversations/"+selected+"/messages",token,{method:"POST",body:JSON.stringify({body:reply})});
-      setReply("");await loadMessages();await loadConversations();setNotice("پیام در صف داخلی ثبت شد؛ هنوز به پیام‌رسان ارسال نشده است.");
+      const result=await api<{status:string;deliveryNote:string}>("/api/organizations/"+organizationId+"/inbox/conversations/"+selected+"/messages",token,{method:"POST",body:JSON.stringify({body:reply})});
+      setReply("");await loadMessages();await loadConversations();setNotice(result.deliveryNote || (result.status==="Sent"?"پیام ارسال شد.":"پیام در صف داخلی ثبت شد."));
     });
   }
   async function createConversation() {
@@ -97,7 +97,7 @@ export default function InboxPage() {
       <section className="inbox-chat-panel">
         {active?<><div className="inbox-chat-header"><div><span>گفتگو</span><h2>{active.contactName||active.subject||"مکالمه بدون عنوان"}</h2><small>{active.channelName||active.channel||"کانال نامشخص"} · {active.messageCount.toLocaleString("en-US")} پیام</small></div><select value={active.status} onChange={e=>void changeStatus(e.target.value)} disabled={busy}><option value="Open">باز</option><option value="Pending">در انتظار پاسخ</option><option value="Resolved">بسته‌شده</option></select></div>
           <div className="inbox-messages">{messages.length===0?<p className="inbox-empty-state">هنوز پیامی برای این مکالمه ثبت نشده است.</p>:messages.map(message=><article key={message.id} className={"inbox-message "+(message.direction==="Outbound"?"outbound":"inbound")}><p>{message.body}</p><footer><time>{new Date(message.createdAt).toLocaleString("en-US")}</time><span>{message.direction==="Outbound"?"ارسالی · "+(message.status==="Queued"?"در صف داخلی":message.status):"دریافتی"}</span></footer></article>)}</div>
-          <form className="inbox-reply" onSubmit={send}><textarea value={reply} onChange={e=>setReply(e.target.value)} maxLength={10000} placeholder="پاسخ اپراتور را بنویسید..." required/><button disabled={busy||!reply.trim()||active.status==="Resolved"}>ثبت پاسخ در صف</button><small>فعلاً پیام فقط در سامانه ذخیره می‌شود؛ ارسال به پیام‌رسان پس از راه‌اندازی ارسال‌گر رسمی فعال خواهد شد.</small></form>
+          <form className="inbox-reply" onSubmit={send}><textarea value={reply} onChange={e=>setReply(e.target.value)} maxLength={10000} placeholder="پاسخ اپراتور را بنویسید..." required/><button disabled={busy||!reply.trim()||active.status==="Resolved"}>ارسال پاسخ</button><small>برای مکالمه تلگرام متصل، ارسال از طریق Bot API انجام می‌شود؛ سایر کانال‌ها تا اتصال ارسال‌گر رسمی در صف داخلی می‌مانند.</small></form>
         </>:<div className="inbox-select-prompt"><div>✉</div><h2>یک مکالمه انتخاب کنید</h2><p>برای مشاهده تاریخچه پیام‌ها، مکالمه‌ای را از فهرست انتخاب کنید.</p></div>}
       </section>
     </div>
