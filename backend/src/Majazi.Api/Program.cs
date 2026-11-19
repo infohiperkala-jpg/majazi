@@ -2897,11 +2897,6 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var scheduleTemplateError = ValidateWhatsAppTemplate(request.WhatsAppTemplateName, request.WhatsAppTemplateLanguage, request.WhatsAppTemplateParameters,
         connection.Provider == "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct));
     if (scheduleTemplateError is not null) return Results.BadRequest(new { error = scheduleTemplateError });
-    var componentsError = ValidateWhatsAppTemplateComponents(request.WhatsAppTemplateComponentsJson);
-    if (componentsError is not null) return Results.BadRequest(new { error = componentsError });
-    if (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateComponentsJson) && string.IsNullOrWhiteSpace(request.WhatsAppTemplateName))
-        return Results.BadRequest(new { error = "برای اجزای پیشرفته، نام قالب واتساپ الزامی است." });
-
     if (connection.Provider != "WhatsApp" && (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ||
         !string.IsNullOrWhiteSpace(request.WhatsAppTemplateLanguage) || request.WhatsAppTemplateParameters is { Length: > 0 }))
         return Results.BadRequest(new { error = "قالب تأییدشده فقط برای کانال واتساپ قابل استفاده است." });
@@ -2909,7 +2904,6 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     draft.WhatsAppTemplateLanguage = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateLanguage) ?? "en_US";
     draft.WhatsAppTemplateParametersJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null :
         JsonSerializer.Serialize(request.WhatsAppTemplateParameters ?? Array.Empty<string>());
-    draft.WhatsAppTemplateComponentsJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateComponentsJson);
     draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
     draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2946,11 +2940,6 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     var publishTemplateError = ValidateWhatsAppTemplate(request.WhatsAppTemplateName, request.WhatsAppTemplateLanguage, request.WhatsAppTemplateParameters,
         connection.Provider == "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct));
     if (publishTemplateError is not null) return Results.BadRequest(new { error = publishTemplateError });
-    var componentsError = ValidateWhatsAppTemplateComponents(request.WhatsAppTemplateComponentsJson);
-    if (componentsError is not null) return Results.BadRequest(new { error = componentsError });
-    if (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateComponentsJson) && string.IsNullOrWhiteSpace(request.WhatsAppTemplateName))
-        return Results.BadRequest(new { error = "برای اجزای پیشرفته، نام قالب واتساپ الزامی است." });
-
     if (connection.Provider != "WhatsApp" && (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ||
         !string.IsNullOrWhiteSpace(request.WhatsAppTemplateLanguage) || request.WhatsAppTemplateParameters is { Length: > 0 }))
         return Results.BadRequest(new { error = "قالب تأییدشده فقط برای کانال واتساپ قابل استفاده است." });
@@ -2958,7 +2947,6 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     draft.WhatsAppTemplateLanguage = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateLanguage) ?? "en_US";
     draft.WhatsAppTemplateParametersJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null :
         JsonSerializer.Serialize(request.WhatsAppTemplateParameters ?? Array.Empty<string>());
-    draft.WhatsAppTemplateComponentsJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateComponentsJson);
     draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
     draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2977,7 +2965,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/cancel-schedule", async (Guid organiz
     if (draft is null) return Results.NotFound();
     if (draft.Status != "Scheduled") return Results.Conflict(new { error = "این محتوا در صف زمان‌بندی نیست." });
     draft.Status = "Approved"; draft.ScheduledAt = null; draft.PublishConnectionId = null; draft.PublishTarget = null;
-    draft.WhatsAppTemplateName = null; draft.WhatsAppTemplateLanguage = null; draft.WhatsAppTemplateParametersJson = null; draft.WhatsAppTemplateComponentsJson = null;
+    draft.WhatsAppTemplateName = null; draft.WhatsAppTemplateLanguage = null; draft.WhatsAppTemplateParametersJson = null;
     draft.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { draft.Id, draft.Status });
@@ -3452,10 +3440,124 @@ inboxApi.MapGet("/conversations/{conversationId:guid}/messages", async (Guid org
     var exists = await db.InboxConversations.AnyAsync(x => x.Id == conversationId && x.OrganizationId == organizationId, ct);
     if (!exists) return Results.NotFound();
     var messages = await db.InboxMessages.AsNoTracking().Where(x => x.ConversationId == conversationId)
-        .OrderBy(x => x.CreatedAt)
-        .Select(x => new { x.Id, x.ExternalMessageId, x.Direction, x.Body, x.Status, x.SentAt, x.CreatedAt, x.CreatedByUserId })
-        .Take(500).ToListAsync(ct);
-    return Results.Ok(messages);
+        .OrderBy(x => x.CreatedAt).Take(500).ToListAsync(ct);
+    var result = messages.Select(message =>
+    {
+        string? mediaType = null;
+        var mediaAvailable = false;
+        if (!string.IsNullOrWhiteSpace(message.ProviderPayload))
+        {
+            try
+            {
+                using var payload = JsonDocument.Parse(message.ProviderPayload);
+                var root = payload.RootElement;
+                mediaType = root.TryGetProperty("type", out var type) ? type.GetString() : null;
+                mediaAvailable = mediaType is "image" or "audio" or "video" or "document" or "sticker" &&
+                    root.TryGetProperty(mediaType, out var media) && media.TryGetProperty("id", out var mediaId) &&
+                    !string.IsNullOrWhiteSpace(mediaId.GetString());
+            }
+            catch (JsonException) { }
+        }
+        return new { message.Id, message.ExternalMessageId, message.Direction, message.Body, message.Status,
+            message.SentAt, message.CreatedAt, message.CreatedByUserId, mediaAvailable, mediaType };
+    });
+    return Results.Ok(result);
+});
+
+inboxApi.MapGet("/messages/{messageId:guid}/media", async (Guid organizationId, Guid messageId,
+    ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection, IHttpClientFactory clients,
+    IConfiguration config, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var message = await db.InboxMessages.AsNoTracking()
+        .Include(x => x.Conversation).ThenInclude(x => x!.ChannelConnection)
+        .SingleOrDefaultAsync(x => x.Id == messageId && x.Conversation!.OrganizationId == organizationId, ct);
+    if (message?.Conversation?.ChannelConnection?.Provider != "WhatsApp" ||
+        string.IsNullOrWhiteSpace(message.ProviderPayload) ||
+        string.IsNullOrWhiteSpace(message.Conversation.ChannelConnection.EncryptedAccessToken))
+        return Results.NotFound();
+
+    string mediaId;
+    string mediaType;
+    string? requestedFileName = null;
+    try
+    {
+        using var payload = JsonDocument.Parse(message.ProviderPayload);
+        var root = payload.RootElement;
+        mediaType = root.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? "" : "";
+        if (mediaType is not ("image" or "audio" or "video" or "document" or "sticker") ||
+            !root.TryGetProperty(mediaType, out var media) ||
+            !media.TryGetProperty("id", out var idElement) ||
+            string.IsNullOrWhiteSpace(mediaId = idElement.GetString() ?? "") || mediaId.Length > 200)
+            return Results.NotFound();
+        if (media.TryGetProperty("filename", out var fileNameElement))
+            requestedFileName = fileNameElement.GetString();
+    }
+    catch (JsonException) { return Results.Problem("اطلاعات رسانه پیام معتبر نیست.", statusCode: 422); }
+
+    string token;
+    try { token = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(message.Conversation.ChannelConnection.EncryptedAccessToken); }
+    catch (CryptographicException) { return Results.Conflict(new { error = "توکن کانال واتساپ قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
+
+    var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+    var client = clients.CreateClient("MetaOAuth");
+    try
+    {
+        using var metadataRequest = new HttpRequestMessage(HttpMethod.Get,
+            $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(mediaId)}");
+        metadataRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        using var metadataResponse = await client.SendAsync(metadataRequest, ct);
+        if (!metadataResponse.IsSuccessStatusCode)
+            return Results.Problem("Meta اطلاعات رسانه را در دسترس قرار نداد؛ مجوزهای WhatsApp را بررسی کنید.", statusCode: 502);
+        using var metadata = await JsonDocument.ParseAsync(await metadataResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var meta = metadata.RootElement;
+        var url = meta.TryGetProperty("url", out var urlElement) ? urlElement.GetString() : null;
+        var mime = meta.TryGetProperty("mime_type", out var mimeElement) ? mimeElement.GetString() : null;
+        var size = meta.TryGetProperty("file_size", out var sizeElement) && sizeElement.TryGetInt64(out var parsedSize) ? parsedSize : 0;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var mediaUri) || mediaUri.Scheme != Uri.UriSchemeHttps ||
+            !(mediaUri.Host.Equals("lookaside.fbsbx.com", StringComparison.OrdinalIgnoreCase) ||
+              mediaUri.Host.EndsWith(".fbcdn.net", StringComparison.OrdinalIgnoreCase)))
+            return Results.Problem("نشانی رسانه برگشتی از Meta معتبر نیست.", statusCode: 502);
+        if (size is < 0 or > 25 * 1024 * 1024)
+            return Results.Problem("اندازه رسانه از سقف ۲۵ مگابایت بیشتر است.", statusCode: 413);
+
+        var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "image/jpeg", "image/png", "image/webp", "image/gif",
+            "audio/aac", "audio/amr", "audio/mpeg", "audio/mp4", "audio/ogg",
+            "video/mp4", "video/3gpp", "application/pdf",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        };
+        if (string.IsNullOrWhiteSpace(mime) || !allowedTypes.Contains(mime))
+            return Results.Problem("نوع فایل رسانه در فهرست مجاز دانلود نیست.", statusCode: 415);
+
+        using var downloadRequest = new HttpRequestMessage(HttpMethod.Get, mediaUri);
+        downloadRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        using var downloadResponse = await client.SendAsync(downloadRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!downloadResponse.IsSuccessStatusCode)
+            return Results.Problem("دریافت فایل از Meta ناموفق بود.", statusCode: 502);
+        if (downloadResponse.Content.Headers.ContentLength is long contentLength && contentLength > 25 * 1024 * 1024)
+            return Results.Problem("اندازه رسانه از سقف ۲۵ مگابایت بیشتر است.", statusCode: 413);
+        await using var input = await downloadResponse.Content.ReadAsStreamAsync(ct);
+        await using var output = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await input.ReadAsync(chunk, ct)) > 0)
+        {
+            if (output.Length + read > 25 * 1024 * 1024)
+                return Results.Problem("اندازه رسانه از سقف ۲۵ مگابایت بیشتر است.", statusCode: 413);
+            await output.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+        var fileName = Path.GetFileName(string.IsNullOrWhiteSpace(requestedFileName) ? $"{mediaType}-{message.Id}" : requestedFileName);
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 180) fileName = $"{mediaType}-{message.Id}";
+        return Results.File(output.ToArray(), mime, fileName);
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    { return Results.Problem("دریافت رسانه واتساپ timeout شد.", statusCode: 504); }
+    catch (HttpRequestException)
+    { return Results.Problem("ارتباط با Meta برای دریافت رسانه برقرار نشد.", statusCode: 502); }
 });
 
 inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConversationRequest request,
@@ -3977,32 +4079,6 @@ static string? ValidateWhatsAppTemplate(string? name, string? language, string[]
     return null;
 }
 
-static string? ValidateWhatsAppTemplateComponents(string? componentsJson)
-{
-    if (string.IsNullOrWhiteSpace(componentsJson)) return null;
-    if (componentsJson.Length > 12000) return "حجم اجزای قالب واتساپ بیش از حد مجاز است.";
-    try
-    {
-        using var document = JsonDocument.Parse(componentsJson);
-        if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() > 10)
-            return "اجزای قالب باید آرایه JSON با حداکثر ۱۰ جزء باشند.";
-        foreach (var component in document.RootElement.EnumerateArray())
-        {
-            if (component.ValueKind != JsonValueKind.Object ||
-                !component.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
-                type.GetString() is not ("header" or "body" or "button"))
-                return "هر جزء قالب باید از نوع header، body یا button باشد.";
-            if (component.TryGetProperty("parameters", out var parameters) &&
-                (parameters.ValueKind != JsonValueKind.Array || parameters.GetArrayLength() > 20))
-                return "پارامترهای هر جزء باید آرایه‌ای با حداکثر ۲۰ مقدار باشند.";
-            if (component.TryGetProperty("index", out var index) && index.ValueKind is not (JsonValueKind.String or JsonValueKind.Number))
-                return "index دکمه قالب معتبر نیست.";
-        }
-        return null;
-    }
-    catch (JsonException) { return "ساختار JSON اجزای قالب معتبر نیست."; }
-}
-
 static string TelegramWebhookSecret(string signingKey, Guid connectionId) =>
     Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),
         Encoding.UTF8.GetBytes("majazi:telegram:secret:" + connectionId.ToString("D")))).ToLowerInvariant();
@@ -4041,9 +4117,9 @@ public sealed record UpdateTextTemplateRequest(string? Name, string? Content, in
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
 
 public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt,
-    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null, string? WhatsAppTemplateComponentsJson = null);
+    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null);
 public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId,
-    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null, string? WhatsAppTemplateComponentsJson = null);
+    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null);
 
 
 public sealed record ContentApprovalRequest(string? Comment);
