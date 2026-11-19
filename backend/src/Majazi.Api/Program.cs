@@ -726,14 +726,15 @@ ordersApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, Maj
         var term = q.Trim();
         if (term.Length > 120) return Results.BadRequest(new { error = "عبارت جست‌وجو بیش از حد طولانی است." });
         query = query.Where(x => x.OrderNumber.Contains(term) || (x.Notes != null && x.Notes.Contains(term)) ||
-            (x.Contact != null && (x.Contact.FullName.Contains(term) || (x.Contact.Email != null && x.Contact.Email.Contains(term)))));
+            db.CrmContacts.Any(c => c.Id == x.ContactId && c.OrganizationId == organizationId &&
+                (c.FullName.Contains(term) || (c.Email != null && c.Email.Contains(term)))));
     }
     var total = await query.CountAsync(ct);
     var items = await query.OrderByDescending(x => x.CreatedAt).Skip((currentPage - 1) * size).Take(size)
         .Select(x => new
         {
             x.Id, x.OrderNumber, x.Status, x.Currency, x.Subtotal, x.Discount, x.Tax, x.Total, x.Version, x.CreatedAt, x.UpdatedAt,
-            x.ContactId, ContactName = x.Contact == null ? null : x.Contact.FullName,
+            x.ContactId, ContactName = db.CrmContacts.Where(c => c.Id == x.ContactId).Select(c => c.FullName).FirstOrDefault(),
             LineCount = db.SalesOrderLines.Count(l => l.OrderId == x.Id),
             Paid = db.PaymentTransactions.Where(p => p.OrderId == x.Id && p.Status == "Paid").Sum(p => (decimal?)p.Amount) ?? 0,
             Refunded = db.PaymentTransactions.Where(p => p.OrderId == x.Id && p.Status == "Refunded").Sum(p => (decimal?)p.Amount) ?? 0
@@ -784,11 +785,11 @@ ordersApi.MapPost("/", async (Guid organizationId, SalesOrderRequest request, Cl
         var lineDiscount = Math.Round(line.Discount, 2, MidpointRounding.AwayFromZero);
         var lineTotal = gross - lineDiscount;
         subtotal += lineTotal;
-        calculated.Add(new SalesOrderLine { Name = name, Sku = Clean(line.Sku), Quantity = Math.Round(line.Quantity, 3), UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
+        calculated.Add(new SalesOrderLine { Name = name, Sku = Clean(line.Sku), Quantity = quantity, UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
     }
     var discount = Math.Round(request.Discount, 2);
     var tax = Math.Round(request.Tax, 2);
-    if (discount > subtotal || subtotal - discount + tax > 9999999999999999m)
+    if (subtotal > 9999999999999999m || discount > subtotal || subtotal - discount + tax > 9999999999999999m)
         return Results.BadRequest(new { error = "مبلغ تخفیف یا مبلغ نهایی خارج از محدوده معتبر است." });
     var order = new SalesOrder
     {
@@ -830,10 +831,12 @@ ordersApi.MapPut("/{orderId:guid}", async (Guid organizationId, Guid orderId, Sa
             line.Quantity <= 0 || line.Quantity > 1000000 || line.UnitPrice < 0 || line.UnitPrice > 9999999999999999m ||
             line.Discount < 0 || line.Discount > line.Quantity * line.UnitPrice)
             return Results.BadRequest(new { error = "نام، تعداد، قیمت یا تخفیف یکی از ردیف‌ها معتبر نیست." });
-        var gross = Math.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        var quantity = Math.Round(line.Quantity, 3);
+        var gross = Math.Round(quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        if (gross > 9999999999999999m) return Results.BadRequest(new { error = "مبلغ یک ردیف از محدوده مجاز بیشتر است." });
         var lineDiscount = Math.Round(line.Discount, 2);
         var lineTotal = gross - lineDiscount; subtotal += lineTotal;
-        calculated.Add(new SalesOrderLine { OrderId = order.Id, Name = name, Sku = Clean(line.Sku), Quantity = Math.Round(line.Quantity, 3), UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
+        calculated.Add(new SalesOrderLine { OrderId = order.Id, Name = name, Sku = Clean(line.Sku), Quantity = quantity, UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
     }
     var discount = Math.Round(request.Discount, 2); var tax = Math.Round(request.Tax, 2);
     if (discount > subtotal || subtotal - discount + tax > 9999999999999999m)
