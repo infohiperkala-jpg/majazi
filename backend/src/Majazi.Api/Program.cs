@@ -1247,6 +1247,45 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
             HasCredential = item.EncryptedAccessToken != null, item.CreatedAt });
 });
+channelsApi.MapPost("/{connectionId:guid}/meta-webhook", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection,
+    IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
+        x => x.Id == connectionId && x.OrganizationId == organizationId && x.Provider is "Instagram" or "Facebook", ct);
+    if (item is null) return Results.NotFound();
+    if (item.Status != "Connected" || string.IsNullOrWhiteSpace(item.EncryptedAccessToken) ||
+        string.IsNullOrWhiteSpace(item.ExternalAccountId))
+        return Results.Conflict(new { error = "ابتدا حساب و توکن Meta را ثبت و با آزمون زنده تأیید کنید." });
+    string token;
+    try { token = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+    catch (CryptographicException) { return Results.Conflict(new { error = "توکن Meta قابل رمزگشایی نیست؛ اتصال را دوباره برقرار کنید." }); }
+    var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+    var host = item.Provider == "Instagram" ? "graph.instagram.com" : "graph.facebook.com";
+    var uri = $"https://{host}/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}/subscribed_apps";
+    using var message = new HttpRequestMessage(HttpMethod.Post, uri);
+    message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    message.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["subscribed_fields"] = "messages" });
+    try
+    {
+        using var response = await clients.CreateClient("MetaOAuth").SendAsync(message, ct);
+        using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        if (!response.IsSuccessStatusCode || !payload.RootElement.TryGetProperty("success", out var success) ||
+            success.ValueKind != JsonValueKind.True)
+            return Results.Problem("Meta اشتراک وب‌هوک پیام‌ها را نپذیرفت؛ مجوزهای messaging و دسترسی حساب را بررسی کنید.", statusCode: 502);
+        return Results.Ok(new { configured = true, provider = item.Provider, callbackUrl = (config["PublicBaseUrl"] ?? "").TrimEnd('/') + "/api/webhooks/meta" });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    { return Results.Problem("ثبت وب‌هوک Meta در زمان مقرر پاسخ نداد.", statusCode: 504); }
+    catch (HttpRequestException)
+    { return Results.Problem("ارتباط با Meta برای ثبت وب‌هوک برقرار نشد.", statusCode: 502); }
+});
+
 channelsApi.MapPost("/{connectionId:guid}/webhook", async (Guid organizationId, Guid connectionId,
     ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection, IHttpClientFactory clients,
     CancellationToken ct) =>
@@ -3254,6 +3293,46 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return Results.Problem("ارسال WhatsApp timeout شد؛ وضعیت تحویل را در Meta بررسی کنید.", statusCode: 504); }
         catch (HttpRequestException) { return Results.Problem("ارتباط با WhatsApp Cloud API برقرار نشد.", statusCode: 502); }
     }
+    // Instagram Messaging and Facebook Messenger Send API.
+    else if (conversation.ChannelConnection?.Provider is "Instagram" or "Facebook")
+    {
+        var channel = conversation.ChannelConnection;
+        if (channel.Status != "Connected" || string.IsNullOrWhiteSpace(channel.EncryptedAccessToken) ||
+            string.IsNullOrWhiteSpace(channel.ExternalAccountId))
+            return Results.Conflict(new { error = "اتصال Meta باید با شناسه حساب و توکن معتبر تأیید شده باشد." });
+        var recipientId = conversation.ExternalConversationId;
+        if (string.IsNullOrWhiteSpace(recipientId) || recipientId.Length > 180 ||
+            recipientId.Any(char.IsWhiteSpace))
+            return Results.Conflict(new { error = "شناسه گیرنده معتبر نیست؛ مکالمه باید از وب‌هوک رسمی Meta دریافت شده باشد." });
+        string tokenValue;
+        try { tokenValue = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن Meta قابل رمزگشایی نیست؛ اتصال را دوباره برقرار کنید." }); }
+        var version = config["Meta:GraphApiVersion"] ?? "v22.0";
+        var host = channel.Provider == "Instagram" ? "graph.instagram.com" : "graph.facebook.com";
+        try
+        {
+            using var outbound = new HttpRequestMessage(HttpMethod.Post,
+                $"https://{host}/{version}/{Uri.EscapeDataString(channel.ExternalAccountId)}/messages");
+            outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenValue);
+            outbound.Content = JsonContent.Create(new { recipient = new { id = recipientId }, message = new { text = body } });
+            using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
+            using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            if (!response.IsSuccessStatusCode)
+                return Results.Problem(channel.Provider == "Instagram"
+                    ? "Instagram Messaging API پیام را نپذیرفت؛ مجوز instagram_business_manage_messages و پنجره مجاز پاسخ را بررسی کنید."
+                    : "Messenger Send API پیام را نپذیرفت؛ مجوز pages_messaging و پنجره مجاز پاسخ را بررسی کنید.", statusCode: 502);
+            if (payload.RootElement.TryGetProperty("message_id", out var messageId))
+                message.ExternalMessageId = messageId.GetString();
+            else if (payload.RootElement.TryGetProperty("id", out var id))
+                message.ExternalMessageId = id.GetString();
+            message.Status = "Sent";
+            message.SentAt = DateTimeOffset.UtcNow;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { return Results.Problem("ارسال پیام از طریق Meta در زمان مقرر پاسخ نداد.", statusCode: 504); }
+        catch (HttpRequestException)
+        { return Results.Problem("ارتباط با Meta Messaging API برقرار نشد؛ پیام در سامانه ثبت نشد.", statusCode: 502); }
+    }
     // Telegram replies are delivered synchronously through the official Bot API.
     // Providers without a delivery adapter remain explicitly queued.
     else if (conversation.ChannelConnection?.Provider == "Telegram")
@@ -3311,7 +3390,7 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         new { message.Id, message.Direction, message.Body, message.Status, message.ExternalMessageId,
             message.SentAt, message.CreatedAt,
             deliveryNote = delivered
-                ? "پیام با موفقیت از طریق Telegram Bot API ارسال شد."
+                ? $"پیام با موفقیت از طریق {conversation.ChannelConnection?.Provider} API ارسال شد."
                 : "پیام فقط در صف داخلی ثبت شد؛ ارسال‌گر رسمی این کانال هنوز فعال نیست." });
 });
 
