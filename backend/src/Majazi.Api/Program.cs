@@ -2894,6 +2894,37 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     if (connection.Provider == "WhatsApp" && !IsValidWhatsAppTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شماره مقصد واتساپ باید با کد کشور و فقط شامل ارقام باشد." });
     if (draft.Channel != connection.Provider) return Results.BadRequest(new { error = "پلتفرم محتوا باید با پلتفرم اتصال انتخاب‌شده یکسان باشد." });
+    if (connection.Provider == "WhatsApp" && !string.IsNullOrWhiteSpace(request.WhatsAppTemplateName))
+    {
+        var templateName = request.WhatsAppTemplateName.Trim();
+        var language = string.IsNullOrWhiteSpace(request.WhatsAppTemplateLanguage) ? "en_US" : request.WhatsAppTemplateLanguage.Trim();
+        var componentsJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateComponents) ? "[]" : request.WhatsAppTemplateComponents;
+        if (templateName.Length > 512 || !System.Text.RegularExpressions.Regex.IsMatch(templateName, "^[a-z0-9_]+$") ||
+            language.Length > 35 || !System.Text.RegularExpressions.Regex.IsMatch(language, "^[a-zA-Z]{2,3}([_-][a-zA-Z0-9]{2,8})*$") ||
+            componentsJson.Length > 12000)
+            return Results.BadRequest(new { error = "نام، زبان یا پارامترهای قالب واتساپ معتبر نیست." });
+        try
+        {
+            using var parsed = System.Text.Json.JsonDocument.Parse(componentsJson);
+            if (parsed.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return Results.BadRequest(new { error = "اجزای قالب باید آرایه JSON باشند." });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Results.BadRequest(new { error = "ساختار JSON اجزای قالب معتبر نیست." });
+        }
+        if (await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct))
+            return Results.BadRequest(new { error = "برای ارسال قالب واتساپ ابتدا پیوست رسانه‌ای را حذف کنید." });
+        draft.WhatsAppTemplateName = templateName;
+        draft.WhatsAppTemplateLanguage = language;
+        draft.WhatsAppTemplateComponents = componentsJson;
+    }
+    else
+    {
+        draft.WhatsAppTemplateName = null;
+        draft.WhatsAppTemplateLanguage = null;
+        draft.WhatsAppTemplateComponents = null;
+    }
     draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
     draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2927,6 +2958,37 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
         return Results.BadRequest(new { error = "شناسه مقصد ایتا معتبر نیست." });
     if (connection.Provider == "WhatsApp" && !IsValidWhatsAppTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شماره مقصد واتساپ باید با کد کشور و فقط شامل ارقام باشد." });
+    if (connection.Provider == "WhatsApp" && !string.IsNullOrWhiteSpace(request.WhatsAppTemplateName))
+    {
+        var templateName = request.WhatsAppTemplateName.Trim();
+        var language = string.IsNullOrWhiteSpace(request.WhatsAppTemplateLanguage) ? "en_US" : request.WhatsAppTemplateLanguage.Trim();
+        var componentsJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateComponents) ? "[]" : request.WhatsAppTemplateComponents;
+        if (templateName.Length > 512 || !System.Text.RegularExpressions.Regex.IsMatch(templateName, "^[a-z0-9_]+$") ||
+            language.Length > 35 || !System.Text.RegularExpressions.Regex.IsMatch(language, "^[a-zA-Z]{2,3}([_-][a-zA-Z0-9]{2,8})*$") ||
+            componentsJson.Length > 12000)
+            return Results.BadRequest(new { error = "نام، زبان یا پارامترهای قالب واتساپ معتبر نیست." });
+        try
+        {
+            using var parsed = System.Text.Json.JsonDocument.Parse(componentsJson);
+            if (parsed.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return Results.BadRequest(new { error = "اجزای قالب باید آرایه JSON باشند." });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Results.BadRequest(new { error = "ساختار JSON اجزای قالب معتبر نیست." });
+        }
+        if (await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct))
+            return Results.BadRequest(new { error = "برای ارسال قالب واتساپ ابتدا پیوست رسانه‌ای را حذف کنید." });
+        draft.WhatsAppTemplateName = templateName;
+        draft.WhatsAppTemplateLanguage = language;
+        draft.WhatsAppTemplateComponents = componentsJson;
+    }
+    else
+    {
+        draft.WhatsAppTemplateName = null;
+        draft.WhatsAppTemplateLanguage = null;
+        draft.WhatsAppTemplateComponents = null;
+    }
     draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
     draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -3959,8 +4021,8 @@ public sealed record TextTemplateRequest(string? Module, string? Field, string? 
 public sealed record UpdateTextTemplateRequest(string? Name, string? Content, int SortOrder, bool IsActive);
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
 
-public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt);
-public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId);
+public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt, string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string? WhatsAppTemplateComponents = null);
+public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId, string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string? WhatsAppTemplateComponents = null);
 
 
 public sealed record ContentApprovalRequest(string? Comment);
