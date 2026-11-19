@@ -2130,7 +2130,7 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
     var conditionOperator = request.ConditionOperator?.Trim() ?? "Equals";
     var actionType = request.ActionType?.Trim(); var actionValue = request.ActionValue?.Trim();
     if (string.IsNullOrWhiteSpace(name) || name.Length > 120 ||
-        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged") ||
+        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged" or "ContentApproved") ||
         conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany") ||
         conditionOperator is not ("Equals" or "Contains") ||
         actionType is not ("CreateActivity" or "UpdateLeadStage") ||
@@ -2139,7 +2139,8 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
         (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
         ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
         (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
-        (actionType == "UpdateLeadStage" && trigger == "ContactCreated") ||
+        (actionType == "UpdateLeadStage" && trigger is "ContactCreated" or "ContentApproved") ||
+        (trigger == "ContentApproved" && conditionField != "Any") ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
         return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
     if (actionType == "UpdateLeadStage" &&
@@ -2176,7 +2177,7 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
     var conditionOperator = request.ConditionOperator?.Trim() ?? "Equals";
     var actionType = request.ActionType?.Trim(); var actionValue = request.ActionValue?.Trim();
     if (string.IsNullOrWhiteSpace(name) || name.Length > 120 ||
-        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged") ||
+        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged" or "ContentApproved") ||
         conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany") ||
         conditionOperator is not ("Equals" or "Contains") ||
         actionType is not ("CreateActivity" or "UpdateLeadStage") ||
@@ -2185,7 +2186,8 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
         (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
         ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
         (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
-        (actionType == "UpdateLeadStage" && trigger == "ContactCreated") ||
+        (actionType == "UpdateLeadStage" && trigger is "ContactCreated" or "ContentApproved") ||
+        (trigger == "ContentApproved" && conditionField != "Any") ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
         return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
     if (actionType == "UpdateLeadStage" &&
@@ -2242,6 +2244,15 @@ automationApi.MapPost("/rules/{ruleId:guid}/run-now", async (Guid organizationId
         subjectType = "Contact";
         subjectId = contact.Id;
         payload = new { manual = true, requestedBy = userId.Value, contactId = contact.Id };
+    }
+    else if (rule.Trigger == "ContentApproved")
+    {
+        var draft = await db.ContentDrafts.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.Status == "Approved")
+            .OrderByDescending(x => x.ApprovedAt).FirstOrDefaultAsync(ct);
+        if (draft is null) return Results.Conflict(new { error = "برای اجرای این قانون، ابتدا یک محتوا را تا مرحله تأیید نهایی تأیید کنید." });
+        subjectType = "ContentDraft";
+        subjectId = draft.Id;
+        payload = new { manual = true, requestedBy = userId.Value, contentTitle = draft.Title, contentChannel = draft.Channel };
     }
     else
     {
@@ -2713,7 +2724,13 @@ contentApi.MapPost("/drafts/{draftId:guid}/approve", async (Guid organizationId,
     });
     draft.Status = stage == 1 ? "InReview" : "Approved";
     draft.UpdatedAt = DateTimeOffset.UtcNow;
-    if (stage == 2) { draft.ApprovedAt = DateTimeOffset.UtcNow; draft.ApprovedByUserId = userId.Value; }
+    if (stage == 2)
+    {
+        draft.ApprovedAt = DateTimeOffset.UtcNow;
+        draft.ApprovedByUserId = userId.Value;
+        await QueueAutomationRunsAsync(db, organizationId, "ContentApproved", "ContentDraft", draft.Id,
+            new { contentTitle = draft.Title, contentChannel = draft.Channel }, ct);
+    }
     await db.SaveChangesAsync(ct);
     return Results.Ok(new
     {
