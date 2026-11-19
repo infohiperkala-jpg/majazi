@@ -1727,6 +1727,10 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
         .OrderBy(x => x.SortOrder).Select(x => x.Key).FirstOrDefaultAsync(ct);
     if (initialStatus is null)
     {
+        var hasDefinitions = await db.StatusDefinitions.AnyAsync(
+            x => x.OrganizationId == organizationId && x.Module == "inbox.conversation", ct);
+        if (hasDefinitions)
+            return Results.Conflict(new { error = "همه وضعیت‌های مکالمه غیرفعال‌اند؛ ابتدا یک وضعیت را در تنظیمات فعال کنید." });
         var now = DateTimeOffset.UtcNow;
         var defaults = defaultStatusesByModule["inbox.conversation"];
         db.StatusDefinitions.AddRange(defaults.Select((x, index) => new StatusDefinition
