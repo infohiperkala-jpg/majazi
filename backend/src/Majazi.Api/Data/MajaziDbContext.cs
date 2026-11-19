@@ -166,7 +166,7 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.ToTable("content_approval_records"); e.HasKey(x => x.Id);
             e.Property(x => x.Decision).HasMaxLength(20).IsRequired();
             e.Property(x => x.Comment).HasMaxLength(1000);
-            e.HasIndex(x => new { x.DraftId, x.StageNumber }).IsUnique();
+            e.HasIndex(x => new { x.DraftId, x.ReviewRound, x.StageNumber }).IsUnique();
             e.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
             e.HasOne<ContentDraft>().WithMany().HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
