@@ -916,6 +916,68 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
     }
 });
 
+channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection, IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == connectionId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(item.EncryptedAccessToken))
+        return Results.Conflict(new { error = "برای این اتصال اعتبارنامه ثبت نشده است." });
+    string credential;
+    try { credential = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+    catch (CryptographicException) { return Results.Conflict(new { error = "اعتبارنامه رمز‌شده قابل خواندن نیست؛ اتصال را دوباره برقرار کنید." }); }
+    var started = DateTimeOffset.UtcNow;
+    try
+    {
+        string endpoint;
+        if (item.Provider == "Telegram") endpoint = $"https://api.telegram.org/bot{credential}/getMe";
+        else if (item.Provider == "Instagram") endpoint = QueryHelpers.AddQueryString("https://graph.instagram.com/me",
+            new Dictionary<string, string?> { ["fields"] = "id,user_id,username", ["access_token"] = credential });
+        else return Results.Conflict(new { error = "برای این پلتفرم هنوز آداپتور رسمی بررسی سلامت پیاده‌سازی نشده است." });
+        using var response = await clients.CreateClient(item.Provider == "Telegram" ? "TelegramBotApi" : "MetaOAuth").GetAsync(endpoint, ct);
+        using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var root = payload.RootElement;
+        var providerOk = response.IsSuccessStatusCode &&
+            (item.Provider == "Telegram"
+                ? root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
+                : root.TryGetProperty("id", out _));
+        if (!providerOk)
+        {
+            item.Status = "VerificationFailed";
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { healthy = false, provider = item.Provider, status = item.Status,
+                checkedAt = DateTimeOffset.UtcNow, latencyMs = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds,
+                message = "سرویس مقصد اعتبارنامه را تأیید نکرد." });
+        }
+        var result = root.TryGetProperty("result", out var telegramResult) ? telegramResult : root;
+        if (result.TryGetProperty("id", out var externalId)) item.ExternalAccountId = externalId.ToString();
+        var accountName = result.TryGetProperty("username", out var username) ? username.GetString() : item.DisplayName;
+        item.Status = "Connected";
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { healthy = true, provider = item.Provider, status = item.Status,
+            accountName, externalAccountId = item.ExternalAccountId, checkedAt = DateTimeOffset.UtcNow,
+            latencyMs = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds,
+            message = "اعتبارنامه با API مقصد تأیید شد." });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    {
+        return Results.Ok(new { healthy = false, provider = item.Provider, status = item.Status,
+            checkedAt = DateTimeOffset.UtcNow, message = "پاسخ سرویس مقصد در مهلت مقرر دریافت نشد." });
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Ok(new { healthy = false, provider = item.Provider, status = item.Status,
+            checkedAt = DateTimeOffset.UtcNow, message = "ارتباط شبکه‌ای با سرویس مقصد برقرار نشد؛ مسیر خروجی و پراکسی را بررسی کنید." });
+    }
+});
+
 channelsApi.MapDelete("/{connectionId:guid}", async (Guid organizationId, Guid connectionId,
     ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
@@ -1051,6 +1113,18 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
 var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
 
 var growthAgentApi = app.MapGroup("/api/organizations/{organizationId:guid}/growth-agent").RequireAuthorization();
+
+growthAgentApi.MapGet("/latest-plan", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var plan = await db.ContentDrafts.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.Prompt == "برنامه روزانه خودکار عامل رشد MAJAZI")
+        .OrderByDescending(x => x.CreatedAt)
+        .Select(x => new { x.Id, x.Title, x.Content, x.Status, x.CreatedAt, x.AiModel })
+        .FirstOrDefaultAsync(ct);
+    return plan is null ? Results.NotFound() : Results.Ok(plan);
+});
 
 growthAgentApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, CancellationToken ct) =>
 {
