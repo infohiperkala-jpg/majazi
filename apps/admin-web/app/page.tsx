@@ -296,7 +296,7 @@ export default function Home() {
       <div className="sidebar-bottom"><i/> اتصال زنده به هسته سامانه</div>
     </aside>
     <section className="content">
-      <header className="topbar"><div><span className="eyebrow">مرکز فرماندهی</span><h1>داشبورد مدیریت</h1></div><div className="profile"><span className="avatar">م</span>مدیر سامانه<button type="button" className="logout-button" onClick={logout}>خروج</button></div></header>
+      <header className="topbar"><div><span className="eyebrow">مرکز فرماندهی</span><h1>داشبورد مدیریت</h1></div><div className="topbar-work-actions"><a href="/content">مشاهده و ویرایش محتوا</a><a href="/content?mode=ai">✦ ایجاد با هوش مصنوعی</a><a href="/content?mode=manual">＋ ایجاد دستی</a><a href="/channels">اتصال پیام‌رسان‌ها</a></div><div className="profile"><span className="avatar">م</span>مدیر سامانه<button type="button" className="logout-button" onClick={logout}>خروج</button></div></header>
       <div className="section-heading" id="status"><div><h2>داشبورد مدیریت کل</h2><p>نمای کلی وضعیت سازمان، ارتباطات و عملکرد بازاریابی</p></div><span className="pill">نسخه توسعه</span></div>
       <div className="stats">
         <article className="stat"><span>سازمان‌های فعال</span><strong>{loading ? "…" : organizations.length}</strong><small>داده مستقیم از پایگاه داده</small></article>
