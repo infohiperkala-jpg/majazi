@@ -26,9 +26,20 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<KnowledgeArticle> KnowledgeArticles => Set<KnowledgeArticle>();
     public DbSet<KnowledgeArticleRevision> KnowledgeArticleRevisions => Set<KnowledgeArticleRevision>();
     public DbSet<OrganizationAuditEvent> OrganizationAuditEvents => Set<OrganizationAuditEvent>();
+    public DbSet<OrganizationAiProviderSetting> OrganizationAiProviderSettings => Set<OrganizationAiProviderSetting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<OrganizationAiProviderSetting>(e =>
+        {
+            e.ToTable("organization_ai_provider_settings"); e.HasKey(x => x.Id);
+            e.Property(x => x.BaseUrl).HasMaxLength(500).IsRequired();
+            e.Property(x => x.Model).HasMaxLength(160).IsRequired();
+            e.Property(x => x.EncryptedApiKey).HasMaxLength(12000);
+            e.HasIndex(x => x.OrganizationId).IsUnique();
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<OrganizationAuditEvent>(e =>
         {
             e.ToTable("organization_audit_events"); e.HasKey(x => x.Id);
