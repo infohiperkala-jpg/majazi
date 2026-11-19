@@ -26,6 +26,9 @@ services:
       Meta__AppSecret: ${META_APP_SECRET:-}
       Meta__RedirectUri: ${META_REDIRECT_URI:-}
       Meta__FrontendReturnUrl: ${META_FRONTEND_RETURN_URL:-/channels?meta=connected}
+      AI__BaseUrl: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI__ApiKey: ${AI_API_KEY:-}
+      AI__Model: ${AI_MODEL:-gpt-4o-mini}
     volumes: [majazi-dataprotection:/var/lib/majazi/keys]
     ports: ["5080:8080"]
     depends_on:
