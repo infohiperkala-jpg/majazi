@@ -65,6 +65,25 @@ export default function InboxPage() {
     try{await action();}catch(e){setError(e instanceof Error?e.message:"عملیات ناموفق بود.");}
     finally{setBusy(false);}
   }
+  async function generateReply() {
+    const conversation = items.find(x=>x.id===selected);
+    if (!conversation || !organizationId || !token) return;
+    await run(async()=>{
+      const latestInbound = [...messages].reverse().find(x=>x.direction==="Inbound")?.body ?? conversation.lastMessage ?? "";
+      const result = await api<{text:string}>("/api/organizations/"+organizationId+"/ai/generate-text",token,{
+        method:"POST",
+        body:JSON.stringify({
+          module:"inbox", field:"message.reply",
+          context:"مخاطب: "+(conversation.contactName||"مخاطب")+"؛ عنوان مکالمه: "+(conversation.subject||"بدون عنوان")+"؛ آخرین پیام دریافتی: "+latestInbound,
+          currentText:reply,
+          instructions:"یک پاسخ کوتاه، مودبانه، دقیق و متناسب با آخرین پیام بنویس. اگر اطلاعات لازم در مکالمه نیست، قول یا اطلاعات ساختگی نده و سؤال روشن‌کننده پیشنهاد کن."
+        })
+      });
+      setReply(result.text);
+      setNotice("پاسخ پیشنهادی آماده شد؛ متن را بررسی و در صورت تأیید ارسال کنید.");
+    });
+  }
+
   async function send(e:FormEvent<HTMLFormElement>) {
     e.preventDefault();
     await run(async()=>{
@@ -103,7 +122,7 @@ export default function InboxPage() {
       <section className="inbox-chat-panel">
         {active?<><div className="inbox-chat-header"><div><span>گفتگو</span><h2>{active.contactName||active.subject||"مکالمه بدون عنوان"}</h2><small>{active.channelName||active.channel||"کانال نامشخص"} · {active.messageCount.toLocaleString("en-US")} پیام</small></div><select value={active.status.toLowerCase()} onChange={e=>void changeStatus(e.target.value)} disabled={busy}><option value="" disabled>انتخاب وضعیت</option>{statusOptions.map(x=><option key={x.id} value={x.key}>{x.label}</option>)}</select></div>
           <div className="inbox-messages">{messages.length===0?<p className="inbox-empty-state">هنوز پیامی برای این مکالمه ثبت نشده است.</p>:messages.map(message=><article key={message.id} className={"inbox-message "+(message.direction==="Outbound"?"outbound":"inbound")}><p>{message.body}</p><footer><time>{new Date(message.createdAt).toLocaleString("en-US")}</time><span>{message.direction==="Outbound"?"ارسالی · "+(message.status==="Queued"?"در صف داخلی":message.status):"دریافتی"}</span></footer></article>)}</div>
-          <form className="inbox-reply" onSubmit={send}><textarea value={reply} onChange={e=>setReply(e.target.value)} maxLength={10000} placeholder="پاسخ اپراتور را بنویسید..." required/><button disabled={busy||!reply.trim()||active.status.toLowerCase()==="resolved"}>ارسال پاسخ</button><small>برای مکالمه تلگرام متصل، ارسال از طریق Bot API انجام می‌شود؛ سایر کانال‌ها تا اتصال ارسال‌گر رسمی در صف داخلی می‌مانند.</small></form>
+          <form className="inbox-reply" onSubmit={send}><textarea value={reply} onChange={e=>setReply(e.target.value)} maxLength={10000} placeholder="پاسخ اپراتور را بنویسید..." required/><div className="inbox-reply-actions"><button type="button" disabled={busy||active.status.toLowerCase()==="resolved"} onClick={()=>void generateReply()}>پیشنهاد پاسخ با هوش مصنوعی</button><button disabled={busy||!reply.trim()||active.status.toLowerCase()==="resolved"}>ارسال پاسخ</button></div><small>برای مکالمه تلگرام متصل، ارسال از طریق Bot API انجام می‌شود؛ سایر کانال‌ها تا اتصال ارسال‌گر رسمی در صف داخلی می‌مانند.</small></form>
         </>:<div className="inbox-select-prompt"><div>✉</div><h2>یک مکالمه انتخاب کنید</h2><p>برای مشاهده تاریخچه پیام‌ها، مکالمه‌ای را از فهرست انتخاب کنید.</p></div>}
       </section>
     </div>
