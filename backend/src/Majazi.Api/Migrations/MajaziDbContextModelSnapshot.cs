@@ -14,6 +14,48 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.AutomationRule", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("ActionType").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.Property<string>("ActionValue").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<string>("ActivityType").HasMaxLength(32).HasColumnType("character varying(32)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<string>("ConditionField").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.Property<string>("ConditionOperator").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
+            b.Property<string>("ConditionValue").HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<bool>("IsEnabled").HasColumnType("boolean");
+            b.Property<string>("Name").IsRequired().HasMaxLength(120).HasColumnType("character varying(120)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<string>("Trigger").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "Trigger", "IsEnabled");
+            b.ToTable("automation_rules", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.AutomationRun", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CompletedAt").HasColumnType("timestamp with time zone");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Error").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<string>("PayloadJson").IsRequired().HasColumnType("jsonb");
+            b.Property<string>("Result").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<Guid>("RuleId").HasColumnType("uuid");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<Guid>("SubjectId").HasColumnType("uuid");
+            b.Property<string>("SubjectType").IsRequired().HasMaxLength(24).HasColumnType("character varying(24)");
+            b.Property<DateTimeOffset?>("StartedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Status").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
+            b.Property<string>("Trigger").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "RuleId", "CreatedAt");
+            b.HasIndex("Status", "CreatedAt");
+            b.ToTable("automation_runs", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.TextTemplate", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -413,5 +455,16 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Navigation("Brands");
             b.Navigation("Memberships");
         });
+        modelBuilder.Entity("Majazi.Api.Models.AutomationRun", b =>
+        {
+            b.HasOne("Majazi.Api.Models.AutomationRule", null).WithMany().HasForeignKey("RuleId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.AutomationRule", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+
     }
 }
