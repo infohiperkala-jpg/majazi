@@ -8,7 +8,8 @@ type Organization={id:string;name:string;role:string};
 type Brand={id:string;name:string};
 type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[]};
 type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
-type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};\ntype PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
+type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
+type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
 async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
  const response=await fetch("/backend-api"+path,{...init,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token,...init?.headers},cache:"no-store"});
  const data=await response.json().catch(()=>null);
@@ -29,7 +30,8 @@ export default function ContentStudioPage(){
   const [drafts,aiStatus,brandList,publishTargets]=await Promise.all([
    api<Draft[]>("/api/organizations/"+organization+"/content/drafts?status="+filter+"&q="+encodeURIComponent(query),access),
    api<AIStatus>("/api/organizations/"+organization+"/content/ai/status",access),
-   api<Brand[]>("/api/organizations/"+organization+"/brands",access)
+   api<Brand[]>("/api/organizations/"+organization+"/brands",access),
+   api<PublishTarget[]>("/api/organizations/"+organization+"/content/publish-targets",access)
   ]);
   setItems(drafts);setAi(aiStatus);setBrands(brandList);setTargets(publishTargets);if(!connectionId&&publishTargets.length)setConnectionId(publishTargets[0].id);
   if(selected&&!drafts.some(x=>x.id===selected)){setSelected("");setDetail(null);}
@@ -57,7 +59,24 @@ export default function ContentStudioPage(){
    await openDraft(selected);await refresh();setNotice("ویرایش ذخیره شد و نسخه جدیدی در تاریخچه ثبت شد.");
   });
  }
- async function schedule(){\n  if(!selected)return;await run(async()=>{\n   if(!connectionId||!targetChatId.trim()||!scheduledAt)throw new Error("اتصال تلگرام، شناسه مقصد و زمان انتشار را مشخص کنید.");\n   await api(base+"/drafts/"+selected+"/schedule",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim(),scheduledAt:new Date(scheduledAt).toISOString()})});\n   await openDraft(selected);await refresh();setNotice("محتوا برای انتشار زمان‌بندی شد.");\n  });\n }\n async function publishNow(){\n  if(!selected)return;await run(async()=>{\n   if(!connectionId||!targetChatId.trim())throw new Error("اتصال تلگرام و شناسه مقصد را مشخص کنید.");\n   await api(base+"/drafts/"+selected+"/publish-now",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim()})});\n   await openDraft(selected);await refresh();setNotice("محتوا در صف ارسال فوری قرار گرفت.");\n  });\n }\n async function cancelSchedule(){\n  if(!selected)return;await run(async()=>{await api(base+"/drafts/"+selected+"/cancel-schedule",token,{method:"POST"});await openDraft(selected);await refresh();setNotice("زمان‌بندی لغو شد.");});\n }\n async function approve(){
+ async function schedule(){
+  if(!selected)return;await run(async()=>{
+   if(!connectionId||!targetChatId.trim()||!scheduledAt)throw new Error("اتصال تلگرام، شناسه مقصد و زمان انتشار را مشخص کنید.");
+   await api(base+"/drafts/"+selected+"/schedule",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim(),scheduledAt:new Date(scheduledAt).toISOString()})});
+   await openDraft(selected);await refresh();setNotice("محتوا برای انتشار زمان‌بندی شد.");
+  });
+ }
+ async function publishNow(){
+  if(!selected)return;await run(async()=>{
+   if(!connectionId||!targetChatId.trim())throw new Error("اتصال تلگرام و شناسه مقصد را مشخص کنید.");
+   await api(base+"/drafts/"+selected+"/publish-now",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim()})});
+   await openDraft(selected);await refresh();setNotice("محتوا در صف ارسال فوری قرار گرفت.");
+  });
+ }
+ async function cancelSchedule(){
+  if(!selected)return;await run(async()=>{await api(base+"/drafts/"+selected+"/cancel-schedule",token,{method:"POST"});await openDraft(selected);await refresh();setNotice("زمان‌بندی لغو شد.");});
+ }
+ async function approve(){
   if(!selected)return;await run(async()=>{
    await api(base+"/drafts/"+selected+"/approve",token,{method:"POST"});
    await openDraft(selected);await refresh();setNotice("محتوا تأیید شد.");
