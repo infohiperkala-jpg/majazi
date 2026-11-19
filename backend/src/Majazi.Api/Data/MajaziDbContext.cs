@@ -19,9 +19,22 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<ContentDraft> ContentDrafts => Set<ContentDraft>();
     public DbSet<ContentDraftVersion> ContentDraftVersions => Set<ContentDraftVersion>();
     public DbSet<ContentApprovalRecord> ContentApprovalRecords => Set<ContentApprovalRecord>();
+    public DbSet<StatusDefinition> StatusDefinitions => Set<StatusDefinition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<StatusDefinition>(e =>
+        {
+            e.ToTable("status_definitions"); e.HasKey(x => x.Id);
+            e.Property(x => x.Module).HasMaxLength(80).IsRequired();
+            e.Property(x => x.Key).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Label).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Color).HasMaxLength(7).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => new { x.OrganizationId, x.Module, x.Key }).IsUnique();
+            e.HasIndex(x => new { x.OrganizationId, x.Module, x.SortOrder });
+        });
+
         modelBuilder.Entity<Organization>(e =>
         {
             e.ToTable("organizations"); e.HasKey(x => x.Id);

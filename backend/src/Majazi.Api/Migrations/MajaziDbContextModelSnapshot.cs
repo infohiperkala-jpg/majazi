@@ -14,6 +14,25 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.StatusDefinition", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("Color").IsRequired().HasMaxLength(7).HasColumnType("character varying(7)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Description").HasMaxLength(500).HasColumnType("character varying(500)");
+            b.Property<bool>("IsActive").HasColumnType("boolean");
+            b.Property<string>("Key").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+            b.Property<string>("Label").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
+            b.Property<string>("Module").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<int>("SortOrder").HasColumnType("integer");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "Module", "Key").IsUnique();
+            b.HasIndex("OrganizationId", "Module", "SortOrder");
+            b.ToTable("status_definitions", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.AppUser", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");

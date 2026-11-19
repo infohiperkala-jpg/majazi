@@ -219,3 +219,17 @@ public sealed class ContentApprovalRecord
     public Guid ActorUserId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+public sealed class StatusDefinition
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public required string Module { get; set; }
+    public required string Key { get; set; }
+    public required string Label { get; set; }
+    public string Color { get; set; } = "#64748b";
+    public string? Description { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
