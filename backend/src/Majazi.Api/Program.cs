@@ -1022,8 +1022,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var scheduledAt = request.ScheduledAt;
     if (scheduledAt is null || scheduledAt <= DateTimeOffset.UtcNow.AddMinutes(1) || scheduledAt > DateTimeOffset.UtcNow.AddYears(1))
         return Results.BadRequest(new { error = "زمان انتشار باید حداقل یک دقیقه بعد و حداکثر تا یک سال آینده باشد." });
-    if (string.IsNullOrWhiteSpace(request.TargetChatId) || request.TargetChatId.Length > 180 ||
-        !long.TryParse(request.TargetChatId, out _))
+    if (!IsValidTelegramChatTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام را وارد کنید." });
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
@@ -1053,7 +1052,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     if (draft.Status != "Approved" || draft.Channel != "Telegram")
         return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام قابل انتشار است." });
     if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
-    if (string.IsNullOrWhiteSpace(request.TargetChatId) || !long.TryParse(request.TargetChatId, out _))
+    if (!IsValidTelegramChatTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام الزامی است." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
         x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected", ct);
@@ -1446,6 +1445,15 @@ static object IssueToken(AppUser user, IConfiguration config)
 static string TelegramWebhookSignature(string signingKey, Guid connectionId) =>
     Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),
         Encoding.UTF8.GetBytes("majazi:telegram:path:" + connectionId.ToString("D")))).ToLowerInvariant();
+
+static bool IsValidTelegramChatTarget(string? target)
+{
+    if (string.IsNullOrWhiteSpace(target)) return false;
+    var value = target.Trim();
+    if (value.Length > 180) return false;
+    if (long.TryParse(value, out _)) return true;
+    return value.Length > 1 && value[0] == '@' && value[1..].All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_');
+}
 
 static string TelegramWebhookSecret(string signingKey, Guid connectionId) =>
     Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),
