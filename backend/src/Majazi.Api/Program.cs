@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -31,9 +32,15 @@ builder.Services.AddDbContext<MajaziDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddDataProtection()
     .SetApplicationName("MAJAZI")
     .PersistKeysToFileSystem(new DirectoryInfo(builder.Configuration["DataProtection:KeysPath"] ?? "/var/lib/majazi/keys"));
-builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12));
-builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20));
-builder.Services.AddHttpClient("AIProvider", client => client.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateEgressHandler(
+        builder.Configuration["Network:TelegramProxy"] ?? builder.Configuration["Network:InternationalDefaultProxy"]));
+builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateEgressHandler(
+        builder.Configuration["Network:MetaProxy"] ?? builder.Configuration["Network:InternationalDefaultProxy"]));
+builder.Services.AddHttpClient("AIProvider", client => client.Timeout = TimeSpan.FromSeconds(90))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateEgressHandler(
+        builder.Configuration["Network:AIProxy"] ?? builder.Configuration["Network:InternationalDefaultProxy"]));
 builder.Services.AddHostedService<ContentPublishingWorker>();
 builder.Services.AddHostedService<GrowthAgentWorker>();
 builder.Services.AddMemoryCache();
@@ -1610,6 +1617,19 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
 });
 
 app.Run();
+
+
+static SocketsHttpHandler CreateEgressHandler(string? proxyAddress)
+{
+    var handler = new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(15), PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
+    if (string.IsNullOrWhiteSpace(proxyAddress)) return handler;
+    if (!Uri.TryCreate(proxyAddress, UriKind.Absolute, out var proxyUri) ||
+        proxyUri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(proxyUri.UserInfo))
+        throw new InvalidOperationException("External egress proxy must be an HTTP(S) URL without embedded credentials.");
+    handler.Proxy = new WebProxy(proxyUri);
+    handler.UseProxy = true;
+    return handler;
+}
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
 {
