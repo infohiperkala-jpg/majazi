@@ -48,7 +48,7 @@ export default function ContentStudioPage(){
   setDetail(result);setApprovals(history);setApprovalComment("");setTitle(result.title);setContent(result.content);
  }
  useEffect(()=>{
-  const saved=localStorage.getItem("majazi_access_token")??"";setToken(saved);
+  const requestedMode=new URLSearchParams(window.location.search).get("mode");if(requestedMode==="manual")setCreateMode("manual");else if(requestedMode==="ai")setCreateMode("ai");const saved=localStorage.getItem("majazi_access_token")??"";setToken(saved);
   if(saved)api<Organization[]>("/api/organizations",saved).then(list=>{setOrgs(list);setOrg(list[0]?.id??"");}).catch(e=>setError(e instanceof Error?e.message:"دریافت سازمان‌ها ناموفق بود."));
  },[]);
  useEffect(()=>{if(token&&org)refresh(token,org).catch(e=>setError(e instanceof Error?e.message:"بارگذاری استودیو ناموفق بود."));},[token,org,filter]);
