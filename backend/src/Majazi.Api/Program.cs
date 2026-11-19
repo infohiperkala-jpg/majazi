@@ -3114,8 +3114,10 @@ contentApi.MapPost("/drafts/{draftId:guid}/attachment", async (Guid organization
         return Results.BadRequest(new { error = "فایل باید بین ۱ بایت تا ۲۵ مگابایت باشد." });
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
-    if (draft.Channel != "Eitaa")
-        return Results.BadRequest(new { error = "پیوست رسانه‌ای این نسخه فقط برای انتشار ایتا فعال است." });
+    if (draft.Channel is not ("Eitaa" or "Telegram"))
+        return Results.BadRequest(new { error = "پیوست رسانه‌ای در این نسخه فقط برای انتشار تلگرام و ایتا فعال است." });
+    if (draft.Channel == "Telegram" && draft.Content.Length > 1024)
+        return Results.BadRequest(new { error = "متن همراه فایل تلگرام حداکثر ۱۰۲۴ نویسه است؛ متن را کوتاه کنید." });
     if (draft.Status is "Scheduled" or "Publishing" or "Published")
         return Results.Conflict(new { error = "برای تغییر پیوست، ابتدا زمان‌بندی را لغو کنید؛ محتوای منتشرشده قابل تغییر نیست." });
     var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
