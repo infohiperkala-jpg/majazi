@@ -1366,7 +1366,6 @@ aiApi.MapGet("/settings", async (Guid organizationId, ClaimsPrincipal principal,
     var membership = await db.OrganizationMemberships.AsNoTracking()
         .SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
     if (membership is null) return Results.NotFound();
-    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
     var saved = await db.OrganizationAiProviderSettings.AsNoTracking()
         .SingleOrDefaultAsync(x => x.OrganizationId == organizationId, ct);
     var baseUrl = saved?.BaseUrl ?? config["AI:BaseUrl"];
