@@ -32,7 +32,6 @@ jobs:
       Jwt__SigningKey: majazi-ci-only-signing-key-not-for-production-2026
       Jwt__Issuer: majazi-api
       Jwt__Audience: majazi-web
-      DataProtection__KeysPath: ${{ runner.temp }}/majazi-data-protection
       ASPNETCORE_URLS: http://127.0.0.1:5080
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/majazi-data-protection"
+          export DataProtection__KeysPath="$RUNNER_TEMP/majazi-data-protection"
           dotnet run --project backend/src/Majazi.Api/Majazi.Api.csproj --configuration Release --no-build > "$RUNNER_TEMP/majazi-api.log" 2>&1 &
           api_pid=$!
           cleanup() {
