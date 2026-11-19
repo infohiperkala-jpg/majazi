@@ -27,3 +27,7 @@
 .growth-network-grid span{padding:10px;border-radius:9px;background:#f7f6fa;font-size:10px;color:#6e7484}
 .growth-network-grid b{color:#4e426f}
 @media(max-width:700px){.growth-latest-head{flex-direction:column}.growth-network-grid{grid-template-columns:1fr 1fr}}
+
+.growth-integration-meta{display:flex;flex-wrap:wrap;gap:8px;padding:10px 0 2px}
+.growth-integration-meta span{font-size:10px;color:#777f91;background:#f7f6fa;border-radius:8px;padding:8px 10px}
+.growth-integration-meta b{color:#55477f}
