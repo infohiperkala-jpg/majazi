@@ -1055,7 +1055,7 @@ growthAgentApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal
     return Results.Ok(new {
         enabled = org.GrowthAgentEnabled,
         lastRunAt = org.GrowthAgentLastRunAt,
-        aiConfigured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) && !string.IsNullOrWhiteSpace(config["AI:Model"]),
+        aiConfigured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) && !string.IsNullOrWhiteSpace(config["AI:Model"]) && Uri.TryCreate(config["AI:BaseUrl"], UriKind.Absolute, out var aiEndpoint) && (aiEndpoint.Scheme == Uri.UriSchemeHttps || aiEndpoint.IsLoopback),
         cadence = "daily",
         execution = "server-background-worker",
         autoPublishing = false
