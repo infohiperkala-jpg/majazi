@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   async rewrites() {
-    return [{ source: "/backend-api/:path*", destination: `${process.env.API_INTERNAL_URL ?? "http://localhost:5080"}/:path*` }];
+    return [{ source: "/backend-api/:path*", destination: `${process.env.API_INTERNAL_URL ?? "http://api:8080"}/:path*` }];
   },
 };
 
