@@ -6,7 +6,7 @@ import "./content.css";
 
 type Organization={id:string;name:string;role:string};
 type Brand={id:string;name:string};
-type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[];attachments?:ContentAttachment[]};
+type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[];attachments?:ContentAttachment[];whatsAppTemplateName?:string|null;whatsAppTemplateLanguage?:string|null;whatsAppTemplateParametersJson?:string|null};
 type ContentAttachment={id:string;fileName:string;contentType:string;size:number;createdAt:string};
 type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
 type Approval={id:string;reviewRound:number;stageNumber:number;decision:string;comment?:string|null;actorUserId:string;createdAt:string};
@@ -24,7 +24,7 @@ const statuses:Record<string,string>={Draft:"پیش‌نویس",InReview:"در �
 export default function ContentStudioPage(){
  const [token,setToken]=useState("");const [orgs,setOrgs]=useState<Organization[]>([]);const [org,setOrg]=useState("");
  const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [textTemplates,setTextTemplates]=useState<TextTemplate[]>([]);const [calendarItems,setCalendarItems]=useState<CalendarItem[]>([]);const [selected,setSelected]=useState("");
- const [detail,setDetail]=useState<Draft|null>(null);const [approvals,setApprovals]=useState<Approval[]>([]);const [approvalComment,setApprovalComment]=useState("");const [ai,setAi]=useState<AIStatus|null>(null);const [targets,setTargets]=useState<PublishTarget[]>([]);const [connectionId,setConnectionId]=useState("");const [targetChatId,setTargetChatId]=useState("");const [scheduledAt,setScheduledAt]=useState("");
+ const [detail,setDetail]=useState<Draft|null>(null);const [approvals,setApprovals]=useState<Approval[]>([]);const [approvalComment,setApprovalComment]=useState("");const [ai,setAi]=useState<AIStatus|null>(null);const [targets,setTargets]=useState<PublishTarget[]>([]);const [connectionId,setConnectionId]=useState("");const [targetChatId,setTargetChatId]=useState("");const [scheduledAt,setScheduledAt]=useState("");const [waTemplateName,setWaTemplateName]=useState("");const [waTemplateLanguage,setWaTemplateLanguage]=useState("en_US");const [waTemplateParameters,setWaTemplateParameters]=useState("");
  const [topic,setTopic]=useState("");const [manualTitle,setManualTitle]=useState("");const [manualContent,setManualContent]=useState("");const [createMode,setCreateMode]=useState<"ai"|"manual">("ai");const [brandId,setBrandId]=useState("");const [channel,setChannel]=useState("Instagram");const [tone,setTone]=useState("حرفه‌ای و متقاعدکننده");const [instructions,setInstructions]=useState("");
  const [title,setTitle]=useState("");const [content,setContent]=useState("");const [filter,setFilter]=useState("All");const [query,setQuery]=useState("");
  const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [attachmentFile,setAttachmentFile]=useState<File|null>(null);
@@ -48,7 +48,7 @@ export default function ContentStudioPage(){
    api<Draft>(base+"/drafts/"+id,token),
    api<Approval[]>(base+"/drafts/"+id+"/approvals",token)
   ]);
-  setDetail(result);setApprovals(history);setApprovalComment("");setTitle(result.title);setContent(result.content);
+  setDetail(result);setApprovals(history);setApprovalComment("");setTitle(result.title);setContent(result.content);setWaTemplateName(result.whatsAppTemplateName??"");setWaTemplateLanguage(result.whatsAppTemplateLanguage??"en_US");try{const saved=JSON.parse(result.whatsAppTemplateParametersJson??"[]");setWaTemplateParameters(Array.isArray(saved)?saved.join("\n"):"");}catch{setWaTemplateParameters("");}
  }
  useEffect(()=>{
   const requestedMode=new URLSearchParams(window.location.search).get("mode");if(requestedMode==="manual")setCreateMode("manual");else if(requestedMode==="ai")setCreateMode("ai");const saved=localStorage.getItem("majazi_access_token")??"";setToken(saved);
@@ -92,17 +92,21 @@ export default function ContentStudioPage(){
    await openDraft(selected);await refresh();setNotice("ویرایش ذخیره شد و نسخه جدیدی در تاریخچه ثبت شد.");
   });
  }
+ function whatsAppTemplatePayload(){
+  if(!waTemplateName.trim())return {};
+  return {whatsAppTemplateName:waTemplateName.trim(),whatsAppTemplateLanguage:waTemplateLanguage.trim()||"en_US",whatsAppTemplateParameters:waTemplateParameters.split(/\r?\n/).map(value=>value.trim()).filter(Boolean)};
+ }
  async function schedule(){
   if(!selected)return;await run(async()=>{
    if(!connectionId||!targetChatId.trim()||!scheduledAt)throw new Error("اتصال پیام‌رسان، شناسه مقصد و زمان انتشار را مشخص کنید.");
-   await api(base+"/drafts/"+selected+"/schedule",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim(),scheduledAt:new Date(scheduledAt).toISOString()})});
+   await api(base+"/drafts/"+selected+"/schedule",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim(),scheduledAt:new Date(scheduledAt).toISOString(),...whatsAppTemplatePayload()})});
    await openDraft(selected);await refresh();setNotice("محتوا برای انتشار زمان‌بندی شد.");
   });
  }
  async function publishNow(){
   if(!selected)return;await run(async()=>{
    if(!connectionId||!targetChatId.trim())throw new Error("اتصال پیام‌رسان و شناسه مقصد را مشخص کنید.");
-   await api(base+"/drafts/"+selected+"/publish-now",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim()})});
+   await api(base+"/drafts/"+selected+"/publish-now",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim(),...whatsAppTemplatePayload()})});
    await openDraft(selected);await refresh();setNotice("محتوا در صف ارسال فوری قرار گرفت.");
   });
  }
@@ -167,12 +171,13 @@ export default function ContentStudioPage(){
     {<section className="studio-publish"><h3>ارسال به {detail.channel==="Instagram"?"اینستاگرام":detail.channel==="Telegram"?"تلگرام":detail.channel==="Bale"?"بله":detail.channel==="Rubika"?"روبیکا":detail.channel==="Eitaa"?"ایتا":detail.channel==="WhatsApp"?"واتساپ":detail.channel}</h3><p>انتشار فقط پس از تأیید نهایی و انتخاب مقصد مشخص انجام می‌شود.</p>
      {(detail.channel==="Telegram"||detail.channel==="Eitaa"||detail.channel==="WhatsApp")&&<><label>ربات متصل<select value={connectionId} onChange={e=>setConnectionId(e.target.value)}><option value="">انتخاب اتصال</option>{targets.filter(t=>t.provider===detail.channel).map(t=><option key={t.id} value={t.id}>{t.displayName}</option>)}</select></label>
      <label>{detail.channel==="WhatsApp"?"شماره تلفن مقصد با کد کشور":"شناسه چت / کانال مقصد"}<input value={targetChatId} onChange={e=>setTargetChatId(e.target.value)} placeholder={detail.channel==="Eitaa"?"شناسه ایتا یا @username":detail.channel==="WhatsApp"?"مثلاً 989121234567":"مثلاً -1001234567890 یا @channelname"}/></label>
-     <div className="studio-schedule-row"><label>زمان انتشار<input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label><button className="studio-approve" disabled={busy||detail.status!=="Approved"||!targets.some(t=>t.provider===detail.channel)||!targetChatId.trim()||!scheduledAt} onClick={()=>void schedule()}>زمان‌بندی انتشار</button></div>
-     <div className="studio-editor-actions"><button className="studio-primary" disabled={busy||detail.status!=="Approved"||!targets.some(t=>t.provider===detail.channel)||!targetChatId.trim()} onClick={()=>void publishNow()}>ارسال فوری به {detail.channel==="Eitaa"?"ایتا":detail.channel==="WhatsApp"?"واتساپ":"تلگرام"}</button>{detail.status==="Scheduled"&&<button className="studio-approve" disabled={busy} onClick={()=>void cancelSchedule()}>لغو زمان‌بندی</button>}</div>
+     {detail.channel==="WhatsApp"&&<section className="studio-media-panel"><h3>قالب پیام تأییدشده Meta (اختیاری)</h3><p>برای ارسال خارج از پنجره ۲۴ ساعته، نام قالبی را وارد کنید که در WhatsApp Manager تأیید شده است. در صورت خالی‌بودن نام قالب، پیام آزاد عادی ارسال می‌شود و فقط در پنجره خدمات مشتری قابل ارسال است.</p><label>نام دقیق قالب<input value={waTemplateName} onChange={e=>setWaTemplateName(e.target.value)} maxLength={512} placeholder="مثلاً order_update"/></label><label>زبان قالب<input value={waTemplateLanguage} onChange={e=>setWaTemplateLanguage(e.target.value)} maxLength={16} placeholder="en_US یا fa"/></label><label>پارامترهای متن بدنه (هر مقدار در یک خط، به ترتیب و مطابق ترتیب متغیرهای قالب)<textarea value={waTemplateParameters} onChange={e=>setWaTemplateParameters(e.target.value)} rows={4} placeholder={"نام مشتری\nشماره سفارش\nوضعیت سفارش"}/></label>{(detail.attachments?.length??0)>0&&!!waTemplateName.trim()&&<small className="publish-error">برای ارسال قالب متنی، ابتدا پیوست رسانه‌ای را حذف کنید.</small>}<small>این نسخه پارامترهای متنی بدنه را پشتیبانی می‌کند؛ نام و زبان باید با قالب تأییدشده Meta مطابقت داشته باشند. قالب متنی را هم‌زمان با پیوست رسانه‌ای انتخاب نکنید.</small></section>}
+     <div className="studio-schedule-row"><label>زمان انتشار<input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label><button className="studio-approve" disabled={busy||detail.status!=="Approved"||!targets.some(t=>t.provider===detail.channel)||!targetChatId.trim()||!scheduledAt||(detail.channel==="WhatsApp"&&!!waTemplateName.trim()&&(detail.attachments?.length??0)>0)} onClick={()=>void schedule()}>زمان‌بندی انتشار</button></div>
+     <div className="studio-editor-actions"><button className="studio-primary" disabled={busy||detail.status!=="Approved"||!targets.some(t=>t.provider===detail.channel)||!targetChatId.trim()||(detail.channel==="WhatsApp"&&!!waTemplateName.trim()&&(detail.attachments?.length??0)>0)} onClick={()=>void publishNow()}>ارسال فوری به {detail.channel==="Eitaa"?"ایتا":detail.channel==="WhatsApp"?"واتساپ":"تلگرام"}</button>{detail.status==="Scheduled"&&<button className="studio-approve" disabled={busy} onClick={()=>void cancelSchedule()}>لغو زمان‌بندی</button>}</div>
      {detail.status==="Scheduled"&&<small>زمان انتشار: {detail.scheduledAt?new Date(detail.scheduledAt).toLocaleString("fa-IR"):"در صف"}</small>}
      {detail.status==="PublishFailed"&&<small className="publish-error">ارسال ناموفق بود: {detail.publishError||"اتصال ربات، مجوز ارسال و شناسه مقصد را بررسی کنید."} سپس محتوا را دوباره تأیید و زمان‌بندی کنید.</small>}
      {detail.status==="Published"&&<small>منتشرشده در {detail.publishedAt?new Date(detail.publishedAt).toLocaleString("fa-IR"):""}</small>}
-    </>}{detail.channel==="WhatsApp"&&<small>ارسال رسانه از طریق Meta WhatsApp Cloud API انجام می‌شود. شماره مقصد باید با کد کشور و بدون فاصله وارد شود. پیام متنی/رسانه‌ای آزاد فقط در پنجره خدمات مشتری ۲۴ ساعته قابل ارسال است؛ خارج از این بازه باید از قالب تأییدشده Meta استفاده شود که در این مرحله هنوز به صف انتشار اضافه نشده است. فایل صوتی برای حفظ توضیح همراه فایل به‌صورت سند ارسال می‌شود.</small>}{detail.channel==="Eitaa"&&<small>ارسال واقعی از طریق API ایتایار انجام می‌شود. توکن ثبت‌شده باید توکن ایتایار باشد و مقصد باید در پنل ایتایار مجاز شده باشد. این نسخه دریافت پیام ورودی و همگام‌سازی Inbox را ارائه نمی‌کند.</small>}{detail.channel!=="Telegram"&&detail.channel!=="Eitaa"&&detail.channel!=="WhatsApp"&&<small>آداپتور ارسال رسمی {detail.channel} هنوز در MAJAZI فعال نشده است. محتوا ذخیره و قابل ویرایش و تأیید است؛ ارسال واقعی پس از پیاده‌سازی و اتصال API رسمی همین پلتفرم فعال می‌شود.</small>}
+    </>}{detail.channel==="WhatsApp"&&<small>ارسال از طریق Meta WhatsApp Cloud API انجام می‌شود. پیام آزاد فقط در پنجره خدمات مشتری ۲۴ ساعته مجاز است؛ برای ارسال بیرون از این بازه، قالب تأییدشده را در بالا انتخاب کنید. فایل صوتی در این آداپتور به‌صورت سند ارسال می‌شود.</small>}{detail.channel==="Eitaa"&&<small>ارسال واقعی از طریق API ایتایار انجام می‌شود. توکن ثبت‌شده باید توکن ایتایار باشد و مقصد باید در پنل ایتایار مجاز شده باشد. این نسخه دریافت پیام ورودی و همگام‌سازی Inbox را ارائه نمی‌کند.</small>}{detail.channel!=="Telegram"&&detail.channel!=="Eitaa"&&detail.channel!=="WhatsApp"&&<small>آداپتور ارسال رسمی {detail.channel} هنوز در MAJAZI فعال نشده است. محتوا ذخیره و قابل ویرایش و تأیید است؛ ارسال واقعی پس از پیاده‌سازی و اتصال API رسمی همین پلتفرم فعال می‌شود.</small>}
     </section>}</div>
     <aside className="studio-history"><h3>تاریخچه نسخه‌ها</h3>{(detail.versions??[]).map(v=><button key={v.id} onClick={()=>{setTitle(v.title);setContent(v.content);}}><b>نسخه {v.versionNumber}</b><span>{v.changeNote}</span><small>{new Date(v.createdAt).toLocaleString("fa-IR")}</small></button>)}</aside>
    </div>

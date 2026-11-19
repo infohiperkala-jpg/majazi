@@ -311,6 +311,9 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.Property(x => x.AiModel).HasMaxLength(120);
             e.Property(x => x.PublishTarget).HasMaxLength(180);
             e.Property(x => x.PublishError).HasMaxLength(1000);
+            e.Property(x => x.WhatsAppTemplateName).HasMaxLength(512);
+            e.Property(x => x.WhatsAppTemplateLanguage).HasMaxLength(16);
+            e.Property(x => x.WhatsAppTemplateParametersJson).HasMaxLength(4000);
             e.HasIndex(x => new { x.Status, x.ScheduledAt });
             e.HasIndex(x => new { x.OrganizationId, x.Status, x.UpdatedAt });
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);

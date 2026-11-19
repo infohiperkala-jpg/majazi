@@ -394,6 +394,9 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<DateTimeOffset?>("PublishedAt").HasColumnType("timestamp with time zone");
             b.Property<Guid?>("PublishConnectionId").HasColumnType("uuid");
             b.Property<string>("PublishError").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<string>("WhatsAppTemplateName").HasMaxLength(512).HasColumnType("character varying(512)");
+            b.Property<string>("WhatsAppTemplateLanguage").HasMaxLength(16).HasColumnType("character varying(16)");
+            b.Property<string>("WhatsAppTemplateParametersJson").HasMaxLength(4000).HasColumnType("character varying(4000)");
             b.Property<DateTimeOffset?>("ScheduledAt").HasColumnType("timestamp with time zone");
             b.Property<string>("PublishTarget").HasMaxLength(180).HasColumnType("character varying(180)");
             b.Property<string>("Status").IsRequired().HasMaxLength(24).HasColumnType("character varying(24)");
