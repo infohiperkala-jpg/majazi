@@ -380,7 +380,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
-            b.Property<DateTimeOffset>("ApprovedAt").HasColumnType("timestamp with time zone");
+            b.Property<DateTimeOffset?>("ApprovedAt").HasColumnType("timestamp with time zone");
             b.Property<Guid?>("ApprovedByUserId").HasColumnType("uuid");
             b.Property<int>("ApprovalRound").HasColumnType("integer");
             b.Property<string>("AiModel").HasMaxLength(120).HasColumnType("character varying(120)");
@@ -688,6 +688,22 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
             b.Navigation("Organization");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.OrganizationAiProviderSetting", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany()
+                .HasForeignKey("OrganizationId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.TextTemplate", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany()
+                .HasForeignKey("OrganizationId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
 
         modelBuilder.Entity("Majazi.Api.Models.Organization", b =>
