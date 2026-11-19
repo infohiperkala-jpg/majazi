@@ -368,12 +368,31 @@ app.MapDelete("/api/brands/{id:guid}", async (Guid id, ClaimsPrincipal principal
 
 const string statusKeyPattern = "^[a-z0-9][a-z0-9._-]{0,63}$";
 var statusesApi = app.MapGroup("/api/organizations/{organizationId:guid}/statuses").RequireAuthorization();
-var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign", "inbox.conversation", "content.draft"]);
+var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign"]);
+var defaultStatusesByModule = new Dictionary<string, (string Key, string Label, string Color)[]>
+{
+    ["crm.lead"] = [("new", "جدید", "#64748b"), ("qualified", "ارزیابی‌شده", "#2563eb"), ("proposal", "پیشنهاد", "#7c3aed"), ("negotiation", "مذاکره", "#d97706"), ("won", "موفق", "#16a34a"), ("lost", "از دست‌رفته", "#dc2626")],
+    ["campaign"] = [("draft", "پیش‌نویس", "#64748b"), ("scheduled", "زمان‌بندی‌شده", "#2563eb"), ("active", "فعال", "#16a34a"), ("paused", "متوقف", "#d97706"), ("completed", "پایان‌یافته", "#0f766e"), ("cancelled", "لغوشده", "#dc2626")],
+};
 
 statusesApi.MapGet("/", async (Guid organizationId, string? module, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    IEnumerable<string> modulesToSeed = string.IsNullOrWhiteSpace(module)
+        ? defaultStatusesByModule.Keys
+        : defaultStatusesByModule.ContainsKey(module) ? new[] { module } : Array.Empty<string>();
+    foreach (var targetModule in modulesToSeed)
+    {
+        if (await db.StatusDefinitions.AnyAsync(x => x.OrganizationId == organizationId && x.Module == targetModule, ct)) continue;
+        var now = DateTimeOffset.UtcNow;
+        db.StatusDefinitions.AddRange(defaultStatusesByModule[targetModule].Select((item, index) => new StatusDefinition
+        {
+            OrganizationId = organizationId, Module = targetModule, Key = item.Key, Label = item.Label,
+            Color = item.Color, SortOrder = (index + 1) * 10, IsActive = true, CreatedAt = now, UpdatedAt = now
+        }));
+    }
+    if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
     var query = db.StatusDefinitions.AsNoTracking().Where(x => x.OrganizationId == organizationId);
     if (!string.IsNullOrWhiteSpace(module)) query = query.Where(x => x.Module == module);
     var items = await query.OrderBy(x => x.Module).ThenBy(x => x.SortOrder).ThenBy(x => x.Label)
@@ -518,8 +537,8 @@ crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, Cla
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var title = request.Title?.Trim();
-    var stage = request.Stage?.Trim() ?? "New";
-    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || !leadStages.Contains(stage) ||
+    var stage = request.Stage?.Trim() ?? "new";
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || !await IsAllowedConfiguredStatus(db, organizationId, "crm.lead", stage, leadStages, ct) ||
         request.EstimatedValue < 0 || (request.Source?.Length ?? 0) > 120 || (request.Notes?.Length ?? 0) > 4000)
         return Results.BadRequest(new { error = "عنوان، مرحله یا مبلغ فرصت فروش معتبر نیست." });
     if (request.BrandId is Guid brandId && !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
@@ -570,7 +589,7 @@ crmApi.MapPatch("/leads/{leadId:guid}/stage", async (Guid organizationId, Guid l
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
-    if (request.Stage is null || !leadStages.Contains(request.Stage)) return Results.BadRequest(new { error = "مرحله فروش معتبر نیست." });
+    if (request.Stage is null || !await IsAllowedConfiguredStatus(db, organizationId, "crm.lead", request.Stage, leadStages, ct)) return Results.BadRequest(new { error = "مرحله فروش معتبر نیست." });
     var item = await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     item.Stage = request.Stage;
@@ -628,9 +647,9 @@ campaignsApi.MapPost("/", async (Guid organizationId, CampaignRequest request, C
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
-    var name = request.Name?.Trim(); var channel = request.Channel?.Trim(); var status = request.Status?.Trim() ?? "Draft";
+    var name = request.Name?.Trim(); var channel = request.Channel?.Trim(); var status = request.Status?.Trim() ?? "draft";
     if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || channel is null || !campaignChannels.Contains(channel) ||
-        !campaignStatuses.Contains(status) || request.Budget < 0 || request.Budget > 9999999999999999m ||
+        !await IsAllowedConfiguredStatus(db, organizationId, "campaign", status, campaignStatuses, ct) || request.Budget < 0 || request.Budget > 9999999999999999m ||
         (request.Objective?.Length ?? 0) > 1000 || (request.Notes?.Length ?? 0) > 4000 ||
         request.ActualSpend < 0 || request.AttributedRevenue < 0 || request.Impressions < 0 || request.Clicks < 0 || request.Conversions < 0 || request.Clicks > request.Impressions || request.Conversions > request.Clicks ||
         (request.StartsAt.HasValue && request.EndsAt.HasValue && request.EndsAt < request.StartsAt))
@@ -1836,6 +1855,13 @@ static SocketsHttpHandler CreateEgressHandler(string? proxyAddress)
     handler.Proxy = new WebProxy(proxyUri);
     handler.UseProxy = true;
     return handler;
+}
+
+static async Task<bool> IsAllowedConfiguredStatus(MajaziDbContext db, Guid organizationId, string module, string status, HashSet<string> fallback, CancellationToken ct)
+{
+    var definitions = db.StatusDefinitions.Where(x => x.OrganizationId == organizationId && x.Module == module);
+    if (!await definitions.AnyAsync(ct)) return fallback.Contains(status, StringComparer.OrdinalIgnoreCase);
+    return await definitions.AnyAsync(x => x.IsActive && x.Key.ToLower() == status.ToLower(), ct);
 }
 
 static Guid? CurrentUserId(ClaimsPrincipal principal)
