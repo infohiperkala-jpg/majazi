@@ -348,19 +348,6 @@ organizationsApi.MapGet("/{id:guid}/audit-events", async (
         var actionFilter = action.Trim();
         query = query.Where(x => x.Action == actionFilter);
     }
-    if (!string.IsNullOrWhiteSpace(assignment))
-    {
-        if (assignment.Equals("me", StringComparison.OrdinalIgnoreCase))
-            query = query.Where(x => x.AssignedToUserId == userId.Value);
-        else if (assignment.Equals("unassigned", StringComparison.OrdinalIgnoreCase))
-            query = query.Where(x => x.AssignedToUserId == null);
-        else if (Guid.TryParse(assignment, out var assigneeId))
-        {
-            if (!await IsMember(db, assigneeId, organizationId, ct)) return Results.BadRequest(new { error = "عضو انتخاب‌شده متعلق به این سازمان نیست." });
-            query = query.Where(x => x.AssignedToUserId == assigneeId);
-        }
-        else return Results.BadRequest(new { error = "فیلتر مسئول مکالمه معتبر نیست." });
-    }
     if (!string.IsNullOrWhiteSpace(q))
     {
         var term = q.Trim();
@@ -2812,11 +2799,25 @@ inboxApi.MapGet("/assignees", async (Guid organizationId, ClaimsPrincipal princi
 });
 
 inboxApi.MapGet("/conversations", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
-    string? status, string? q, int? page, int? pageSize, CancellationToken ct) =>
+    string? status, string? q, string? assignment, int? page, int? pageSize, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var query = db.InboxConversations.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(assignment))
+    {
+        if (assignment.Equals("me", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.AssignedToUserId == userId.Value);
+        else if (assignment.Equals("unassigned", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.AssignedToUserId == null);
+        else if (Guid.TryParse(assignment, out var assigneeId))
+        {
+            if (!await IsMember(db, assigneeId, organizationId, ct)) return Results.BadRequest(new { error = "عضو انتخاب‌شده متعلق به این سازمان نیست." });
+            query = query.Where(x => x.AssignedToUserId == assigneeId);
+        }
+        else return Results.BadRequest(new { error = "فیلتر مسئول مکالمه معتبر نیست." });
+    }
+
     if (!string.IsNullOrWhiteSpace(status) && status != "All")
         query = query.Where(x => x.Status == status);
     if (!string.IsNullOrWhiteSpace(q))
