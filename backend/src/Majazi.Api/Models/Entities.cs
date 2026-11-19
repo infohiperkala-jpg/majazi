@@ -330,3 +330,15 @@ public sealed class OrganizationAuditEvent
     public string MetadataJson { get; set; } = "{}";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public sealed class OrganizationAiProviderSetting
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public required string BaseUrl { get; set; }
+    public required string Model { get; set; }
+    public string? EncryptedApiKey { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public Guid UpdatedByUserId { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
