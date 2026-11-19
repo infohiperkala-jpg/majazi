@@ -71,7 +71,13 @@ export default function ChannelsPage() {
       window.location.assign(result.authorizationUrl);
     });
   }
-  async function healthCheck(item: Channel) {\n    await run(async () => {\n      const result = await request<{ healthy: boolean; accountName?: string; latencyMs?: number; message: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/health-check", token, { method: "POST" });\n      await reload(); setNotice((result.healthy ? "اتصال سالم است. " : "بررسی اتصال ناموفق بود. ") + result.message + (result.accountName ? " حساب: " + result.accountName : "") + (result.latencyMs != null ? " · زمان پاسخ: " + result.latencyMs + "ms" : ""));\n    });\n  }\n  async function verify(item: Channel) {
+  async function healthCheck(item: Channel) {
+    await run(async () => {
+      const result = await request<{ healthy: boolean; accountName?: string; latencyMs?: number; message: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/health-check", token, { method: "POST" });
+      await reload(); setNotice((result.healthy ? "اتصال سالم است. " : "بررسی اتصال ناموفق بود. ") + result.message + (result.accountName ? " حساب: " + result.accountName : "") + (result.latencyMs != null ? " · زمان پاسخ: " + result.latencyMs + "ms" : ""));
+    });
+  }
+  async function verify(item: Channel) {
     await run(async () => {
       const result = await request<{ username?: string; status: string }>("/api/organizations/" + organizationId + "/channels/" + item.id + "/verify", token, { method: "POST" });
       await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));
