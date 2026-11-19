@@ -33,6 +33,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12));
 builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient("AIProvider", client => client.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddHostedService<ContentPublishingWorker>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -1000,6 +1001,83 @@ contentApi.MapGet("/ai/status", (IConfiguration config) => Results.Ok(new
     keyStored = !string.IsNullOrWhiteSpace(config["AI:ApiKey"])
 }));
 
+
+contentApi.MapGet("/publish-targets", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    return Results.Ok(await db.SocialChannelConnections.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected")
+        .Select(x => new { x.Id, x.DisplayName, x.ExternalAccountId }).ToListAsync(ct));
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId, Guid draftId,
+    ScheduleContentRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId).Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var scheduledAt = request.ScheduledAt;
+    if (scheduledAt is null || scheduledAt <= DateTimeOffset.UtcNow.AddMinutes(1) || scheduledAt > DateTimeOffset.UtcNow.AddYears(1))
+        return Results.BadRequest(new { error = "زمان انتشار باید حداقل یک دقیقه بعد و حداکثر تا یک سال آینده باشد." });
+    if (string.IsNullOrWhiteSpace(request.TargetChatId) || request.TargetChatId.Length > 180 ||
+        !long.TryParse(request.TargetChatId, out _))
+        return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام را وارد کنید." });
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (draft.Status != "Approved") return Results.Conflict(new { error = "ابتدا محتوا باید تأیید نهایی شود." });
+    var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
+        x.Id == request.ConnectionId && x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected", ct);
+    if (connection is null || string.IsNullOrWhiteSpace(connection.EncryptedAccessToken))
+        return Results.BadRequest(new { error = "اتصال فعال تلگرام انتخاب نشده است." });
+    if (draft.Channel != "Telegram") return Results.BadRequest(new { error = "این محتوا برای کانال دیگری تعریف شده است." });
+    draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
+    draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
+    draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { draft.Id, draft.Status, draft.ScheduledAt, draft.PublishTarget });
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizationId, Guid draftId,
+    PublishNowRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId).Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (draft.Status != "Approved" || draft.Channel != "Telegram")
+        return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام قابل انتشار است." });
+    if (string.IsNullOrWhiteSpace(request.TargetChatId) || !long.TryParse(request.TargetChatId, out _))
+        return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام الزامی است." });
+    var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
+        x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected", ct);
+    if (connection is null) return Results.BadRequest(new { error = "اتصال فعال تلگرام یافت نشد." });
+    draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
+    draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
+    draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Accepted(value: new { draft.Id, draft.Status, message = "محتوا برای ارسال فوری در صف قرار گرفت." });
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/cancel-schedule", async (Guid organizationId, Guid draftId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId).Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (draft.Status != "Scheduled") return Results.Conflict(new { error = "این محتوا در صف زمان‌بندی نیست." });
+    draft.Status = "Approved"; draft.ScheduledAt = null; draft.PublishConnectionId = null; draft.PublishTarget = null;
+    draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { draft.Id, draft.Status });
+});
+
 contentApi.MapGet("/drafts", async (Guid organizationId, ClaimsPrincipal principal,
     MajaziDbContext db, string? status, string? q, CancellationToken ct) =>
 {
@@ -1391,3 +1469,6 @@ record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string Di
 
 public sealed record GenerateContentRequest(Guid? BrandId, string? Topic, string? Channel, string? Tone, string? Instructions);
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
+
+public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt);
+public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId);
