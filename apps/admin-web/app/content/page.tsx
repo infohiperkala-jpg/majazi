@@ -9,7 +9,8 @@ type Brand={id:string;name:string};
 type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[]};
 type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
 type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
-type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};\ntype CalendarItem={id:string;title:string;channel:string;status:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null};
+type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
+type CalendarItem={id:string;title:string;channel:string;status:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null};
 async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
  const response=await fetch("/backend-api"+path,{...init,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token,...init?.headers},cache:"no-store"});
  const data=await response.json().catch(()=>null);
