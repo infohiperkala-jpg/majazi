@@ -329,6 +329,42 @@ organizationsApi.MapDelete("/{id:guid}/members/{memberId:guid}", async (Guid id,
     return Results.NoContent();
 });
 
+organizationsApi.MapGet("/{id:guid}/audit-events", async (
+    Guid id, int? page, int? pageSize, string? action, string? q,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == id, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+
+    var currentPage = Math.Clamp(page ?? 1, 1, 100000);
+    var size = Math.Clamp(pageSize ?? 30, 10, 100);
+    var query = db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == id);
+    if (!string.IsNullOrWhiteSpace(action))
+    {
+        var actionFilter = action.Trim();
+        query = query.Where(x => x.Action == actionFilter);
+    }
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        if (term.Length > 120) return Results.BadRequest(new { error = "عبارت جست‌وجو بیش از حد طولانی است." });
+        query = query.Where(x => x.Summary.Contains(term) || x.EntityType.Contains(term) || x.Action.Contains(term));
+    }
+    var total = await query.CountAsync(ct);
+    var items = await query.OrderByDescending(x => x.CreatedAt)
+        .Skip((currentPage - 1) * size).Take(size)
+        .Join(db.Users.AsNoTracking(), e => e.ActorUserId, u => (Guid?)u.Id,
+            (e, u) => new { e.Id, e.Action, e.EntityType, e.EntityId, e.Summary, e.MetadataJson, e.CreatedAt, ActorEmail = u.Email })
+        .ToListAsync(ct);
+    var actions = await db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == id)
+        .Select(x => x.Action).Distinct().OrderBy(x => x).ToListAsync(ct);
+    return Results.Ok(new { items, total, page = currentPage, pageSize = size, actions });
+});
+
 organizationsApi.MapGet("/{id:guid}/brands", async (Guid id, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
