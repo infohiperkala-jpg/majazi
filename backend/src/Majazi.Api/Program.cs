@@ -3506,15 +3506,15 @@ inboxApi.MapGet("/messages/{messageId:guid}/media", async (Guid organizationId, 
             string.IsNullOrWhiteSpace(message.Conversation.ChannelConnection.EncryptedAccessToken))
             return Results.NotFound();
         string fileId;
-        string mediaType;
+        string telegramMediaType;
         string? requestedName = null;
         try
         {
             using var payload = JsonDocument.Parse(message.ProviderPayload);
             var root = payload.RootElement;
             var candidates = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
-            mediaType = candidates.FirstOrDefault(name => root.TryGetProperty(name, out _)) ?? "";
-            if (string.IsNullOrEmpty(mediaType) || !root.TryGetProperty(mediaType, out var media))
+            telegramMediaType = candidates.FirstOrDefault(name => root.TryGetProperty(name, out _)) ?? "";
+            if (string.IsNullOrEmpty(telegramMediaType) || !root.TryGetProperty(telegramMediaType, out var media))
                 return Results.NotFound();
             JsonElement file;
             if (media.ValueKind == JsonValueKind.Array)
@@ -3581,7 +3581,7 @@ inboxApi.MapGet("/messages/{messageId:guid}/media", async (Guid organizationId, 
                     return Results.Problem("اندازه فایل از سقف ۲۰ مگابایت بیشتر است.", statusCode: 413);
                 await output.WriteAsync(buffer.AsMemory(0, read), ct);
             }
-            var fallbackName = $"{mediaType}-{message.Id}{extension}";
+            var fallbackName = $"{telegramMediaType}-{message.Id}{extension}";
             var safeName = Path.GetFileName(string.IsNullOrWhiteSpace(requestedName) ? fallbackName : requestedName);
             if (string.IsNullOrWhiteSpace(safeName) || safeName.Length > 180) safeName = fallbackName;
             return Results.File(output.ToArray(), mime, safeName);
