@@ -32,6 +32,7 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(builder.Configuration["DataProtection:KeysPath"] ?? "/var/lib/majazi/keys"));
 builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12));
 builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHttpClient("AIProvider", client => client.Timeout = TimeSpan.FromSeconds(90));
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -1056,7 +1057,7 @@ contentApi.MapPost("/generate", async (Guid organizationId, GenerateContentReque
             response_format = new { type = "json_object" },
             messages = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
         });
-        using var response = await clients.CreateClient("TelegramBotApi").SendAsync(message, ct);
+        using var response = await clients.CreateClient("AIProvider").SendAsync(message, ct);
         var responseText = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
             return Results.Problem("سرویس هوش مصنوعی پاسخ موفق نداد (" + (int)response.StatusCode + "). تنظیمات مدل و اعتبار دسترسی را بررسی کنید.", statusCode: 502);
