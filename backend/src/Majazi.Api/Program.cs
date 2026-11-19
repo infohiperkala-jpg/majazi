@@ -1218,7 +1218,7 @@ contentApi.MapPut("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
     if (draft is null) return Results.NotFound();
     if (draft.Status is "Scheduled" or "Publishing" or "Published")
         return Results.Conflict(new { error = "برای ویرایش، ابتدا زمان‌بندی را لغو کنید؛ محتوای منتشرشده یا در حال انتشار قابل تغییر نیست." });
-    if (draft.Status == "InReview")
+    if (draft.Status is "InReview" or "Approved" or "PublishFailed")
     {
         draft.Status = "Draft";
         draft.ApprovalRound++;
