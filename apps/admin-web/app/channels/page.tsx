@@ -83,7 +83,13 @@ export default function ChannelsPage() {
       await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));
     });
   }
-  async function configureMetaWebhook(item: Channel) {\n    await run(async () => {\n      await request("/api/organizations/" + organizationId + "/channels/" + item.id + "/meta-webhook", token, { method: "POST" });\n      setNotice("اشتراک وب‌هوک پیام‌های " + item.provider + " در Meta ثبت شد. دریافت پیام‌ها به Inbox منتقل می‌شود.");\n    });\n  }\n  async function configureTelegramWebhook(item: Channel) {
+  async function configureMetaWebhook(item: Channel) {
+    await run(async () => {
+      await request("/api/organizations/" + organizationId + "/channels/" + item.id + "/meta-webhook", token, { method: "POST" });
+      setNotice("اشتراک وب‌هوک پیام‌های " + item.provider + " در Meta ثبت شد. دریافت پیام‌ها به Inbox منتقل می‌شود.");
+    });
+  }
+  async function configureTelegramWebhook(item: Channel) {
     await run(async () => {
       const result = await request<{ configured: boolean; webhookUrl: string }>(
         "/api/organizations/" + organizationId + "/channels/" + item.id + "/webhook",
@@ -119,7 +125,7 @@ export default function ChannelsPage() {
     </form></section>
     <section className="channels-panel"><div className="channels-heading"><h2>کانال‌های ثبت‌شده</h2><span>{items.length.toLocaleString("en-US")} مورد</span></div>
       {items.length === 0 ? <p className="channels-empty">هنوز کانالی برای این سازمان ثبت نشده است.</p> : <div className="channels-list">{items.map(item => <article className="channel-card" key={item.id}>
-        <div className="channel-mark">{item.provider === "Telegram" ? "TG" : item.provider === "Facebook" ? "FB" : item.provider === "WhatsApp" ? "WA" : item.provider === "Facebook" ? "FB" : "IG"}</div>
+        <div className="channel-mark">{item.provider === "Telegram" ? "TG" : item.provider === "Facebook" ? "FB" : item.provider === "WhatsApp" ? "WA" : "IG"}</div>
         <div className="channel-info"><strong>{item.displayName}</strong><span>{providers.find(x => x.id === item.provider)?.label ?? item.provider}{item.externalAccountId ? " · " + item.externalAccountId : ""}</span><small>{statusLabel[item.status] ?? item.status}{item.hasCredential ? " · دارای اعتبارنامه رمز‌شده" : " · بدون اعتبارنامه"}</small></div>
         <div className="channel-actions">{item.hasCredential && (item.provider === "Telegram" || item.provider === "Instagram" || item.provider === "Facebook" || item.provider === "WhatsApp") && <button type="button" className="channels-verify" disabled={busy} onClick={() => void healthCheck(item)}>آزمون زنده اتصال</button>}{item.provider === "Telegram" && item.hasCredential && <button type="button" className="channels-verify" disabled={busy} onClick={() => void verify(item)}>تأیید ربات تلگرام</button>}{item.provider === "Telegram" && item.status === "Connected" && <button type="button" className="channels-verify" disabled={busy} onClick={() => void configureTelegramWebhook(item)}>فعال‌سازی دریافت پیام</button>}{(item.provider === "Instagram" || item.provider === "Facebook") && item.status === "Connected" && <button type="button" className="channels-verify" disabled={busy} onClick={() => void configureMetaWebhook(item)}>فعال‌سازی وب‌هوک Meta</button>}<button type="button" className="channels-delete" disabled={busy} onClick={() => void remove(item)}>حذف</button></div>
       </article>)}</div>}
