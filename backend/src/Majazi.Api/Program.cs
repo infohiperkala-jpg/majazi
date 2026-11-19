@@ -1526,7 +1526,7 @@ knowledgeApi.MapPost("/articles", async (Guid organizationId, KnowledgeArticleRe
     var body = request.Body?.Trim(); var category = request.Category?.Trim();
     if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(body) || body.Length > 60000 ||
         (request.Summary?.Length ?? 0) > 500 || string.IsNullOrWhiteSpace(category) || category.Length > 100 ||
-        (request.Tags?.Length ?? 0) > 1000)
+        (request.Tags?.Length ?? 0) > 1000 || (request.ChangeNote?.Length ?? 0) > 300)
         return Results.BadRequest(new { error = "عنوان، متن، دسته‌بندی یا طول اطلاعات مقاله معتبر نیست." });
     if (string.IsNullOrWhiteSpace(slug)) slug = "article-" + Guid.NewGuid().ToString("N")[..12];
     if (slug.Length > 160 || !slug.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-') || slug.StartsWith('-') || slug.EndsWith('-') || slug.Contains("--"))
@@ -1570,7 +1570,7 @@ knowledgeApi.MapPut("/articles/{articleId:guid}", async (Guid organizationId, Gu
         string.IsNullOrWhiteSpace(slug) || slug.Length > 160 || !slug.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-') ||
         slug.StartsWith('-') || slug.EndsWith('-') || slug.Contains("--") ||
         string.IsNullOrWhiteSpace(category) || category.Length > 100 ||
-        (request.Summary?.Length ?? 0) > 500 || (request.Tags?.Length ?? 0) > 1000)
+        (request.Summary?.Length ?? 0) > 500 || (request.Tags?.Length ?? 0) > 1000 || (request.ChangeNote?.Length ?? 0) > 300)
         return Results.BadRequest(new { error = "اطلاعات مقاله معتبر نیست." });
     if (await db.KnowledgeArticles.AnyAsync(x => x.OrganizationId == organizationId && x.Id != articleId && x.Slug == slug, ct))
         return Results.Conflict(new { error = "این شناسه در همین سازمان قبلاً استفاده شده است." });
@@ -1598,7 +1598,7 @@ knowledgeApi.MapPatch("/articles/{articleId:guid}/status", async (Guid organizat
     var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
     if (membership is null) return Results.NotFound();
     if (request.Status is not ("Draft" or "Published" or "Archived")) return Results.BadRequest(new { error = "وضعیت مقاله معتبر نیست." });
-    if (request.Status is "Published" or "Archived" && membership.Role is not ("Owner" or "Admin"))
+    if ((request.Status is "Published" or "Archived") && membership.Role is not ("Owner" or "Admin"))
         return Results.Forbid();
     var article = await db.KnowledgeArticles.SingleOrDefaultAsync(x => x.Id == articleId && x.OrganizationId == organizationId, ct);
     if (article is null) return Results.NotFound();
