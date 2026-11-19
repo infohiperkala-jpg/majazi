@@ -2879,6 +2879,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
     if (draft.Content.Length > 4096 && draft.Channel == "Telegram") return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
+    if (draft.Channel == "Telegram" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct) && draft.Content.Length > 1024)
+        return Results.BadRequest(new { error = "متن همراه فایل تلگرام حداکثر ۱۰۲۴ نویسه است." });
     if (draft.Status != "Approved") return Results.Conflict(new { error = "ابتدا محتوا باید تأیید نهایی شود." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
         x.Id == request.ConnectionId && x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected", ct);
@@ -2909,6 +2911,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
         return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام یا ایتا قابل انتشار است." });
     if (draft.Channel == "Telegram" && draft.Content.Length > 4096)
         return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
+    if (draft.Channel == "Telegram" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct) && draft.Content.Length > 1024)
+        return Results.BadRequest(new { error = "متن همراه فایل تلگرام حداکثر ۱۰۲۴ نویسه است." });
     if (!IsValidTelegramChatTarget(request.TargetChatId) && !IsValidEitaaTarget(request.TargetChatId))
         return Results.BadRequest(new { error = "شناسه مقصد معتبر نیست؛ شناسه عددی یا نام کاربری وارد کنید." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
