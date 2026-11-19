@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text;
 using System.Threading.RateLimiting;
+using Majazi.Api;
 using Majazi.Api.Data;
 using Majazi.Api.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
