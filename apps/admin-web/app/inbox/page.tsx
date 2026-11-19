@@ -13,7 +13,7 @@ type Conversation = {
   contactName?: string | null; messageCount: number; lastMessage?: string | null;
   lastDirection?: string | null;
 };
-type Message = { id: string; direction: string; body: string; status: string; createdAt: string; createdByUserId?: string | null };
+type Message = { id: string; direction: string; body: string; status: string; createdAt: string; createdByUserId?: string | null; mediaAvailable?: boolean; mediaType?: string | null };
 type StatusOption = { id: string; key: string; label: string; color: string; isActive: boolean; sortOrder: number };
 type TextTemplate = { id: string; module: string; field: string; name: string; content: string; isActive: boolean; sortOrder: number };
 const labels: Record<string,string> = { Open: "باز", Pending: "در انتظار پاسخ", Resolved: "بسته‌شده", open: "باز", pending: "در انتظار پاسخ", resolved: "بسته‌شده" };
@@ -100,6 +100,20 @@ export default function InboxPage() {
       setReply("");await loadMessages();await loadConversations();setNotice(result.deliveryNote || (result.status==="Sent"?"پیام ارسال شد.":"پیام در صف داخلی ثبت شد."));
     });
   }
+  async function downloadMedia(message:Message) {
+    if(!organizationId||!token||!message.mediaAvailable)return;
+    await run(async()=>{
+      const response=await fetch("/backend-api/api/organizations/"+organizationId+"/inbox/messages/"+message.id+"/media",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+      if(!response.ok){const data=await response.json().catch(()=>null);throw new Error(data?.detail||data?.error||"دریافت فایل رسانه ناموفق بود.");}
+      const blob=await response.blob();
+      const disposition=response.headers.get("content-disposition")||"";
+      const encoded=disposition.split("filename*=UTF-8''")[1]?.split(";")[0];
+      const plain=disposition.match(/filename="?([^";]+)"?/i)?.[1];
+      const fileName=encoded?decodeURIComponent(encoded):plain||("whatsapp-"+message.mediaType+"-"+message.id);
+      const url=URL.createObjectURL(blob);const anchor=document.createElement("a");anchor.href=url;anchor.download=fileName;document.body.appendChild(anchor);anchor.click();anchor.remove();URL.revokeObjectURL(url);
+      setNotice("دانلود رسانه پیام انجام شد.");
+    });
+  }
   async function createConversation() {
     const subject=window.prompt("عنوان مکالمه جدید را وارد کنید:");
     if(subject===null||!subject.trim())return;
@@ -139,7 +153,7 @@ export default function InboxPage() {
       </aside>
       <section className="inbox-chat-panel">
         {active?<><div className="inbox-chat-header"><div><span>گفتگو</span><h2>{active.contactName||active.subject||"مکالمه بدون عنوان"}</h2><small>{active.channelName||active.channel||"کانال نامشخص"} · {active.messageCount.toLocaleString("en-US")} پیام · {assignees.find(x=>x.id===active.assignedToUserId)?.email||"بدون مسئول"}</small></div><div className="inbox-conversation-controls"><label>وضعیت<select value={active.status.toLowerCase()} onChange={e=>void changeStatus(e.target.value)} disabled={busy}>{statusOptions.map(x=><option key={x.id} value={x.key}>{x.label}</option>)}</select></label><label>مسئول مکالمه<select value={active.assignedToUserId||""} onChange={e=>void assignConversation(e.target.value)} disabled={busy}><option value="">بدون مسئول</option>{assignees.map(x=><option key={x.id} value={x.id}>{x.email} · {x.role}</option>)}</select></label></div></div>
-          <div className="inbox-messages">{messages.length===0?<p className="inbox-empty-state">هنوز پیامی برای این مکالمه ثبت نشده است.</p>:messages.map(message=><article key={message.id} className={"inbox-message "+(message.direction==="Outbound"?"outbound":"inbound")}><p>{message.body}</p><footer><time>{new Date(message.createdAt).toLocaleString("en-US")}</time><span>{message.direction==="Outbound"?"ارسالی · "+(message.status==="Queued"?"در صف داخلی":message.status):"دریافتی"}</span></footer></article>)}</div>
+          <div className="inbox-messages">{messages.length===0?<p className="inbox-empty-state">هنوز پیامی برای این مکالمه ثبت نشده است.</p>:messages.map(message=><article key={message.id} className={"inbox-message "+(message.direction==="Outbound"?"outbound":"inbound")}><p>{message.body}</p>{message.mediaAvailable&&<button type="button" className="inbox-media-download" disabled={busy} onClick={()=>void downloadMedia(message)}>دریافت فایل {message.mediaType==="image"?"تصویر":message.mediaType==="audio"?"صوت":message.mediaType==="video"?"ویدئو":message.mediaType==="sticker"?"استیکر":"پیوست"}</button>}<footer><time>{new Date(message.createdAt).toLocaleString("en-US")}</time><span>{message.direction==="Outbound"?"ارسالی · "+(message.status==="Queued"?"در صف داخلی":message.status):"دریافتی"}</span></footer></article>)}</div>
           <form className="inbox-reply" onSubmit={send}><select value="" onChange={e=>{const t=replyTemplates.find(x=>x.id===e.target.value);if(t)setReply(t.content);}}><option value="">درج پاسخ آماده…</option>{replyTemplates.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><textarea value={reply} onChange={e=>setReply(e.target.value)} maxLength={10000} placeholder="پاسخ اپراتور را بنویسید..." required/><div className="inbox-reply-actions"><button type="button" disabled={busy||active.status.toLowerCase()==="resolved"} onClick={()=>void generateReply()}>پیشنهاد پاسخ با هوش مصنوعی</button><button disabled={busy||!reply.trim()||active.status.toLowerCase()==="resolved"}>ارسال پاسخ</button></div><small>برای مکالمه تلگرام متصل، ارسال از طریق Bot API انجام می‌شود؛ سایر کانال‌ها تا اتصال ارسال‌گر رسمی در صف داخلی می‌مانند.</small></form>
         </>:<div className="inbox-select-prompt"><div>✉</div><h2>یک مکالمه انتخاب کنید</h2><p>برای مشاهده تاریخچه پیام‌ها، مکالمه‌ای را از فهرست انتخاب کنید.</p></div>}
       </section>
