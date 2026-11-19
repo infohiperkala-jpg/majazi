@@ -27,9 +27,46 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<KnowledgeArticleRevision> KnowledgeArticleRevisions => Set<KnowledgeArticleRevision>();
     public DbSet<OrganizationAuditEvent> OrganizationAuditEvents => Set<OrganizationAuditEvent>();
     public DbSet<OrganizationAiProviderSetting> OrganizationAiProviderSettings => Set<OrganizationAiProviderSetting>();
+    public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
+    public DbSet<SalesOrderLine> SalesOrderLines => Set<SalesOrderLine>();
+    public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<SalesOrder>(e =>
+        {
+            e.ToTable("sales_orders"); e.HasKey(x => x.Id);
+            e.Property(x => x.OrderNumber).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Subtotal).HasPrecision(18, 2); e.Property(x => x.Discount).HasPrecision(18, 2);
+            e.Property(x => x.Tax).HasPrecision(18, 2); e.Property(x => x.Total).HasPrecision(18, 2);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.Property(x => x.Version).IsConcurrencyToken();
+            e.HasIndex(x => new { x.OrganizationId, x.OrderNumber }).IsUnique();
+            e.HasIndex(x => new { x.OrganizationId, x.Status, x.CreatedAt });
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<CrmContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<SalesOrderLine>(e =>
+        {
+            e.ToTable("sales_order_lines"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(240).IsRequired(); e.Property(x => x.Sku).HasMaxLength(100);
+            e.Property(x => x.Quantity).HasPrecision(18, 3); e.Property(x => x.UnitPrice).HasPrecision(18, 2);
+            e.Property(x => x.Discount).HasPrecision(18, 2); e.Property(x => x.LineTotal).HasPrecision(18, 2);
+            e.HasIndex(x => new { x.OrderId, x.SortOrder });
+            e.HasOne<SalesOrder>().WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PaymentTransaction>(e =>
+        {
+            e.ToTable("payment_transactions"); e.HasKey(x => x.Id);
+            e.Property(x => x.Amount).HasPrecision(18, 2); e.Property(x => x.Method).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(20).IsRequired(); e.Property(x => x.Reference).HasMaxLength(180);
+            e.Property(x => x.Note).HasMaxLength(1000);
+            e.HasIndex(x => new { x.OrderId, x.CreatedAt });
+            e.HasOne<SalesOrder>().WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<OrganizationAiProviderSetting>(e =>
         {
             e.ToTable("organization_ai_provider_settings"); e.HasKey(x => x.Id);
