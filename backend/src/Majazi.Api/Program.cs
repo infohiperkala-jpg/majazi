@@ -1424,12 +1424,6 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
             var version = config["Meta:GraphApiVersion"] ?? "v22.0";
             endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,name";
         }
-        else if (item.Provider == "Facebook")
-        {
-            if (string.IsNullOrWhiteSpace(item.ExternalAccountId)) return Results.Conflict(new { error = "برای Facebook باید شناسه صفحه ثبت شود." });
-            var version = config["Meta:GraphApiVersion"] ?? "v22.0";
-            endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,name";
-        }
         else if (item.Provider == "WhatsApp")
         {
             if (string.IsNullOrWhiteSpace(item.ExternalAccountId)) return Results.Conflict(new { error = "برای WhatsApp باید Phone Number ID ثبت شود." });
