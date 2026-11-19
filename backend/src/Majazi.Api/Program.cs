@@ -2878,7 +2878,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
         return Results.BadRequest(new { error = "شناسه مقصد معتبر نیست؛ شماره واتساپ را با کد کشور وارد کنید." });
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
-    if (draft.Content.Length > 4096 && draft.Channel == "Telegram") return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
+    if (draft.Content.Length > 4096 && draft.Channel is "Telegram" or "WhatsApp")
+        return Results.BadRequest(new { error = "متن برای ارسال تلگرام و واتساپ باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (draft.Channel is "Telegram" or "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct) && draft.Content.Length > 1024)
         return Results.BadRequest(new { error = "متن همراه فایل تلگرام و واتساپ حداکثر ۱۰۲۴ نویسه است." });
     if (draft.Status != "Approved") return Results.Conflict(new { error = "ابتدا محتوا باید تأیید نهایی شود." });
@@ -2911,8 +2912,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     if (draft is null) return Results.NotFound();
     if (draft.Status != "Approved" || draft.Channel is not ("Telegram" or "Eitaa" or "WhatsApp"))
         return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام، ایتا یا واتساپ قابل انتشار است." });
-    if (draft.Channel == "Telegram" && draft.Content.Length > 4096)
-        return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
+    if (draft.Channel is "Telegram" or "WhatsApp" && draft.Content.Length > 4096)
+        return Results.BadRequest(new { error = "متن برای ارسال تلگرام و واتساپ باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (draft.Channel is "Telegram" or "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct) && draft.Content.Length > 1024)
         return Results.BadRequest(new { error = "متن همراه فایل تلگرام و واتساپ حداکثر ۱۰۲۴ نویسه است." });
     if (!IsValidTelegramChatTarget(request.TargetChatId) && !IsValidEitaaTarget(request.TargetChatId) && !IsValidWhatsAppTarget(request.TargetChatId))
@@ -3916,7 +3917,8 @@ static bool IsValidEitaaTarget(string? target)
 static bool IsValidWhatsAppTarget(string? target)
 {
     if (string.IsNullOrWhiteSpace(target)) return false;
-    var value = target.Trim().TrimStart('+');
+    var value = target.Trim();
+    if (value.StartsWith('+')) value = value[1..];
     return value.Length is >= 8 and <= 15 && value.All(char.IsAsciiDigit) && value[0] != '0';
 }
 
