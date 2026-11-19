@@ -14,6 +14,47 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.KnowledgeArticle", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("Body").IsRequired().HasMaxLength(60000).HasColumnType("character varying(60000)");
+            b.Property<string>("Category").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<string>("Slug").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+            b.Property<string>("Status").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
+            b.Property<string>("Summary").HasMaxLength(500).HasColumnType("character varying(500)");
+            b.Property<string>("Tags").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<string>("Title").IsRequired().HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("UpdatedByUserId").HasColumnType("uuid");
+            b.Property<int>("Version").HasColumnType("integer");
+            b.Property<DateTimeOffset?>("PublishedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "Slug").IsUnique();
+            b.HasIndex("OrganizationId", "Status", "UpdatedAt");
+            b.ToTable("knowledge_articles", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.KnowledgeArticleRevision", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid>("ArticleId").HasColumnType("uuid");
+            b.Property<string>("Body").IsRequired().HasMaxLength(60000).HasColumnType("character varying(60000)");
+            b.Property<string>("Category").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<Guid>("CreatedByUserId").HasColumnType("uuid");
+            b.Property<string>("ChangeNote").HasMaxLength(300).HasColumnType("character varying(300)");
+            b.Property<string>("Summary").IsRequired().HasMaxLength(500).HasColumnType("character varying(500)");
+            b.Property<string>("Tags").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<string>("Title").IsRequired().HasMaxLength(240).HasColumnType("character varying(240)");
+            b.Property<int>("Version").HasColumnType("integer");
+            b.HasKey("Id");
+            b.HasIndex("ArticleId", "Version").IsUnique();
+            b.ToTable("knowledge_article_revisions", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.AutomationRule", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -33,6 +74,15 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasKey("Id");
             b.HasIndex("OrganizationId", "Trigger", "IsEnabled");
             b.ToTable("automation_rules", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.KnowledgeArticleRevision", b =>
+        {
+            b.HasOne("Majazi.Api.Models.KnowledgeArticle", null).WithMany().HasForeignKey("ArticleId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+        modelBuilder.Entity("Majazi.Api.Models.KnowledgeArticle", b =>
+        {
+            b.HasOne("Majazi.Api.Models.Organization", null).WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
 
         modelBuilder.Entity("Majazi.Api.Models.AutomationRun", b =>
