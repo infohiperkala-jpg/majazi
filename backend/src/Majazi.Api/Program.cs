@@ -3127,6 +3127,7 @@ contentApi.MapGet("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
         .Where(x => x.Id == draftId && x.OrganizationId == organizationId)
         .Select(x => new { x.Id, x.BrandId, x.Title, x.Content, x.Channel, x.Tone, x.Status, x.Prompt, x.AiModel,
             x.CreatedAt, x.UpdatedAt, x.ApprovedAt, x.ScheduledAt, x.PublishedAt, x.PublishError,
+            x.WhatsAppTemplateName, x.WhatsAppTemplateLanguage, x.WhatsAppTemplateParametersJson,
             Attachments = db.ContentDraftAttachments.Where(a => a.DraftId == x.Id)
                 .Select(a => new { a.Id, a.FileName, a.ContentType, a.Size, a.CreatedAt }).ToList(),
             Versions = x.Versions.OrderByDescending(v => v.VersionNumber)
@@ -3947,6 +3948,7 @@ static string? ValidateWhatsAppTemplate(string? name, string? language, string[]
 {
     var hasTemplateInput = !string.IsNullOrWhiteSpace(name) || !string.IsNullOrWhiteSpace(language) || parameters is { Length: > 0 };
     if (!hasTemplateInput) return null;
+    name = name?.Trim();
     if (string.IsNullOrWhiteSpace(name) || name.Length > 512 ||
         !name.All(ch => char.IsAsciiLower(ch) || char.IsAsciiDigit(ch) || ch == '_') ||
         name[0] == '_' || name[^1] == '_')
@@ -3954,8 +3956,8 @@ static string? ValidateWhatsAppTemplate(string? name, string? language, string[]
     var locale = string.IsNullOrWhiteSpace(language) ? "en_US" : language.Trim();
     if (locale.Length is < 2 or > 16 || !locale.All(ch => char.IsAsciiLetter(ch) || char.IsAsciiDigit(ch) || ch is '_' or '-'))
         return "کد زبان قالب معتبر نیست؛ مانند en_US یا fa.";
-    if (parameters is { Length: > 20 } || (parameters ?? Array.Empty<string>()).Any(value => value is null || value.Length > 1024))
-        return "حداکثر ۲۰ پارامتر متنی با طول حداکثر ۱۰۲۴ نویسه برای قالب قابل ثبت است.";
+    if (parameters is { Length: > 20 } || (parameters ?? Array.Empty<string>()).Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 1024))
+        return "حداکثر ۲۰ پارامتر متنی غیرخالی با طول حداکثر ۱۰۲۴ نویسه برای قالب قابل ثبت است.";
     if (hasAttachment)
         return "در این نسخه قالب‌های متنی با پیوست رسانه‌ای هم‌زمان پشتیبانی نمی‌شوند؛ پیوست را حذف کنید یا از پیام رسانه‌ای عادی استفاده کنید.";
     return null;
