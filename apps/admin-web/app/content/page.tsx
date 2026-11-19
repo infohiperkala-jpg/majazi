@@ -105,7 +105,7 @@ export default function ContentStudioPage(){
  if(!token)return <main className="studio-shell"><section className="studio-empty"><h1>استودیوی محتوای MAJAZI</h1><p>برای دسترسی ابتدا وارد پنل شوید.</p><Link href="/">بازگشت به داشبورد</Link></section></main>;
  return <main className="studio-shell" dir="rtl">
   <header className="studio-header"><div><span className="studio-kicker">MAJAZI / AI CONTENT WORKSPACE</span><h1>استودیوی هوشمند محتوا</h1><p>تولید، ویرایش، نسخه‌بندی و تأیید محتوای برند در یک فضای کاری</p></div><Link href="/">بازگشت به داشبورد</Link></header>
-  <section className="studio-toolbar"><label>فضای سازمانی<select value={org} onChange={e=>{setOrg(e.target.value);setSelected("");setDetail(null);}}>{orgs.map(x=><option key={x.id} value={x.id}>{x.name} · {x.role}</option>)}</select></label>
+  <section className="studio-toolbar"><label>فضای سازمانی<select value={org} onChange={e=>{setOrg(e.target.value);setSelected("");setDetail(null);setApprovals([]);setConnectionId("");setTargetChatId("");setScheduledAt("");}}>{orgs.map(x=><option key={x.id} value={x.id}>{x.name} · {x.role}</option>)}</select></label>
    <div className={"ai-connection "+(ai?.configured?"ready":"missing")}><i/>{ai?.configured?("هوش مصنوعی آماده · "+ai.model):"اتصال هوش مصنوعی تنظیم نشده"}</div>
    <button type="button" onClick={()=>void run(()=>refresh())} disabled={busy}>به‌روزرسانی</button>
   </section>
