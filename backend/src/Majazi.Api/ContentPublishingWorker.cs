@@ -30,6 +30,18 @@ public sealed class ContentPublishingWorker(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MajaziDbContext>();
+        // A process can die after claiming a job or after Telegram accepted it but
+        // before the database was updated. Never retry such jobs automatically:
+        // doing so could publish duplicate messages. Mark old claims for operator review.
+        var staleBefore = DateTimeOffset.UtcNow.AddMinutes(-10);
+        await db.ContentDrafts
+            .Where(x => x.Status == "Publishing" && x.UpdatedAt < staleBefore)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.Status, "PublishFailed")
+                .SetProperty(x => x.PublishError,
+                    "فرآیند انتشار بیش از ۱۰ دقیقه بدون ثبت نتیجه باقی مانده است. برای جلوگیری از ارسال تکراری، ارسال خودکار تکرار نشد؛ مقصد تلگرام را بررسی و سپس در صورت نیاز دوباره زمان‌بندی کنید.")
+                .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow), ct);
+
         var dueIds = await db.ContentDrafts.AsNoTracking()
             .Where(x => x.Status == "Scheduled" && x.ScheduledAt <= DateTimeOffset.UtcNow)
             .OrderBy(x => x.ScheduledAt).Select(x => x.Id).Take(10).ToListAsync(ct);
@@ -38,7 +50,10 @@ public sealed class ContentPublishingWorker(
         {
             var claimed = await db.ContentDrafts.Where(x => x.Id == id && x.Status == "Scheduled" &&
                     x.ScheduledAt <= DateTimeOffset.UtcNow)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Status, "Publishing"), ct);
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.Status, "Publishing")
+                    .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow)
+                    .SetProperty(x => x.PublishError, (string?)null), ct);
             if (claimed == 0) continue;
 
             var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == id, ct);
