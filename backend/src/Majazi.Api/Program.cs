@@ -1510,7 +1510,7 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
     var orderRows = await db.SalesOrders.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < endExclusive)
         .Select(x => new { x.Id, x.CreatedAt, x.Status, x.Currency, x.Total }).ToListAsync(ct);
     var orderIds = orderRows.Select(x => x.Id).ToArray();
-    var orderPayments = orderIds.Length == 0 ? [] : await db.PaymentTransactions.AsNoTracking()
+    var orderPayments = await db.PaymentTransactions.AsNoTracking()
         .Where(x => orderIds.Contains(x.OrderId) && x.CreatedAt >= start && x.CreatedAt < endExclusive)
         .Select(x => new { x.OrderId, x.Amount, x.Status }).ToListAsync(ct);
     var paidByOrder = orderPayments.Where(x => x.Status == "Paid").GroupBy(x => x.OrderId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
