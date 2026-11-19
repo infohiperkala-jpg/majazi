@@ -1200,7 +1200,7 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
 });
 
 
-var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram", "WhatsApp"]);
+var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram", "WhatsApp", "Bale", "Rubika"]);
 channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -1331,6 +1331,66 @@ channelsApi.MapPost("/{connectionId:guid}/webhook", async (Guid organizationId, 
     }
 });
 
+channelsApi.MapPost("/{connectionId:guid}/bot-webhook", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection,
+    IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
+        x.Id == connectionId && x.OrganizationId == organizationId && (x.Provider == "Bale" || x.Provider == "Rubika"), ct);
+    if (item is null) return Results.NotFound();
+    if (item.Status != "Connected" || string.IsNullOrWhiteSpace(item.EncryptedAccessToken))
+        return Results.Conflict(new { error = "ابتدا توکن ربات را با آزمون زنده تأیید کنید." });
+    var publicBaseUrl = config["PublicBaseUrl"]?.TrimEnd('/');
+    if (!Uri.TryCreate(publicBaseUrl, UriKind.Absolute, out var baseUri) ||
+        (baseUri.Scheme != Uri.UriSchemeHttps && !baseUri.IsLoopback))
+        return Results.BadRequest(new { error = "PublicBaseUrl باید آدرس عمومی HTTPS سامانه باشد." });
+    var signingKey = config["Jwt:SigningKey"];
+    if (string.IsNullOrWhiteSpace(signingKey)) return Results.Problem("Webhook signing is not configured.", statusCode: 503);
+    var signature = BotWebhookSignature(signingKey, connectionId, item.Provider);
+    var webhookUrl = $"{publicBaseUrl}/api/webhooks/{item.Provider.ToLowerInvariant()}/{connectionId:D}/{signature}";
+    string botToken;
+    try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+    catch (CryptographicException) { return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
+    try
+    {
+        HttpResponseMessage response;
+        if (item.Provider == "Bale")
+        {
+            response = await clients.CreateClient("TelegramBotApi").PostAsJsonAsync(
+                $"https://tapi.bale.ai/bot{botToken}/setWebhook",
+                new { url = webhookUrl, allowed_updates = new[] { "message", "edited_message" }, drop_pending_updates = false }, ct);
+        }
+        else
+        {
+            response = await clients.CreateClient("TelegramBotApi").PostAsJsonAsync(
+                $"https://botapi.rubika.ir/v3/{botToken}/updateBotEndpoints",
+                new { url = webhookUrl, type = "ReceiveUpdate" }, ct);
+        }
+        using (response)
+        using (var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct))
+        {
+            var root = payload.RootElement;
+            var ok = item.Provider == "Bale"
+                ? root.TryGetProperty("ok", out var baleOk) && baleOk.ValueKind == JsonValueKind.True
+                : root.TryGetProperty("status", out var rubikaStatus) && rubikaStatus.GetString() == "OK";
+            if (!response.IsSuccessStatusCode || !ok)
+                return Results.Problem($"سرویس {item.Provider} وب‌هوک را نپذیرفت؛ تنظیمات ربات و دامنه را بررسی کنید.", statusCode: 502);
+        }
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { configured = true, webhookUrl, provider = item.Provider });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    { return Results.Problem("ثبت وب‌هوک در زمان مقرر پاسخ نداد.", statusCode: 504); }
+    catch (HttpRequestException)
+    { return Results.Problem($"ارتباط با API پیام‌رسان {item.Provider} برقرار نشد.", statusCode: 502); }
+});
+
 channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, Guid connectionId,
     ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection,
     IHttpClientFactory httpClientFactory, CancellationToken ct) =>
@@ -1341,10 +1401,48 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
         .Select(x => x.Role).SingleOrDefaultAsync(ct);
     if (role is not ("Owner" or "Admin")) return Results.Forbid();
     var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
-        x => x.Id == connectionId && x.OrganizationId == organizationId && x.Provider == "Telegram", ct);
+        x => x.Id == connectionId && x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Bale" || x.Provider == "Rubika"), ct);
     if (item is null) return Results.NotFound();
     if (string.IsNullOrWhiteSpace(item.EncryptedAccessToken))
         return Results.BadRequest(new { error = "برای این کانال توکن ربات ثبت نشده است." });
+    if (item.Provider is "Bale" or "Rubika")
+    {
+        string verifiedBotToken;
+        try { verifiedBotToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اعتبارنامه را دوباره ثبت کنید." }); }
+        try
+        {
+            var url = item.Provider == "Bale"
+                ? $"https://tapi.bale.ai/bot{verifiedBotToken}/getMe"
+                : $"https://botapi.rubika.ir/v3/{verifiedBotToken}/getMe";
+            using var response = await httpClientFactory.CreateClient("TelegramBotApi").PostAsJsonAsync(url, new { }, ct);
+            using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var root = payload.RootElement;
+            var ok = item.Provider == "Bale"
+                ? response.IsSuccessStatusCode && root.TryGetProperty("ok", out var baleOk) && baleOk.ValueKind == JsonValueKind.True
+                : response.IsSuccessStatusCode && root.TryGetProperty("status", out var rubikaStatus) && rubikaStatus.GetString() == "OK";
+            if (!ok)
+            {
+                item.Status = "VerificationFailed"; item.UpdatedAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(ct);
+                return Results.BadRequest(new { error = $"توکن {item.Provider} تأیید نشد؛ توکن دریافتی از BotFather را بررسی کنید." });
+            }
+            var account = item.Provider == "Bale"
+                ? (root.TryGetProperty("result", out var baleResult) ? baleResult : root)
+                : (root.TryGetProperty("data", out var rubikaData) ? rubikaData : root);
+            var id = account.TryGetProperty("id", out var accountId) ? accountId.ToString() : null;
+            var username = account.TryGetProperty("username", out var userName) ? userName.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(id) && await db.SocialChannelConnections.AnyAsync(x =>
+                x.Id != item.Id && x.OrganizationId == organizationId && x.Provider == item.Provider && x.ExternalAccountId == id, ct))
+                return Results.Conflict(new { error = "این ربات قبلاً در همین سازمان ثبت شده است." });
+            if (!string.IsNullOrWhiteSpace(id)) item.ExternalAccountId = id;
+            item.Status = "Connected"; item.UpdatedAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(ct);
+            return Results.Ok(new { item.Id, item.Provider, item.DisplayName, item.ExternalAccountId, Username = username, item.Status, VerifiedAt = item.UpdatedAt });
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { return Results.Problem($"ارتباط با API {item.Provider} timeout شد.", statusCode: 504); }
+        catch (HttpRequestException)
+        { return Results.Problem($"ارتباط با API {item.Provider} برقرار نشد.", statusCode: 502); }
+    }
 
     string botToken;
     try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
@@ -1416,6 +1514,8 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
     {
         string endpoint;
         if (item.Provider == "Telegram") endpoint = $"https://api.telegram.org/bot{credential}/getMe";
+        else if (item.Provider == "Bale") endpoint = $"https://tapi.bale.ai/bot{credential}/getMe";
+        else if (item.Provider == "Rubika") endpoint = $"https://botapi.rubika.ir/v3/{credential}/getMe";
         else if (item.Provider == "Instagram") endpoint = QueryHelpers.AddQueryString("https://graph.instagram.com/me",
             new Dictionary<string, string?> { ["fields"] = "id,user_id,username", ["access_token"] = credential });
         else if (item.Provider == "Facebook")
@@ -1431,15 +1531,17 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
             endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,display_phone_number,verified_name";
         }
         else return Results.Conflict(new { error = "برای این پلتفرم هنوز آداپتور رسمی بررسی سلامت پیاده‌سازی نشده است." });
-        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        using var request = new HttpRequestMessage(item.Provider == "Rubika" ? HttpMethod.Post : HttpMethod.Get, endpoint);
         if (item.Provider is "WhatsApp" or "Facebook") request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
-        using var response = await clients.CreateClient(item.Provider == "Telegram" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
+        using var response = await clients.CreateClient(item.Provider is "Telegram" or "Bale" or "Rubika" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
         using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = payload.RootElement;
         var providerOk = response.IsSuccessStatusCode &&
-            (item.Provider == "Telegram"
+            (item.Provider is "Telegram" or "Bale"
                 ? root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
-                : root.TryGetProperty("id", out _));
+                : item.Provider == "Rubika"
+                    ? root.TryGetProperty("status", out var rubikaStatus) && rubikaStatus.GetString() == "OK"
+                    : root.TryGetProperty("id", out _));
         if (!providerOk)
         {
             item.Status = "VerificationFailed";
@@ -1449,7 +1551,8 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
                 checkedAt = DateTimeOffset.UtcNow, latencyMs = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds,
                 message = "سرویس مقصد اعتبارنامه را تأیید نکرد." });
         }
-        var result = root.TryGetProperty("result", out var telegramResult) ? telegramResult : root;
+        var result = root.TryGetProperty("result", out var telegramResult) ? telegramResult :
+            root.TryGetProperty("data", out var rubikaData) ? rubikaData : root;
         if (result.TryGetProperty("id", out var externalId)) item.ExternalAccountId = externalId.ToString();
         var accountName = result.TryGetProperty("username", out var username) ? username.GetString() : result.TryGetProperty("name", out var pageName) ? pageName.GetString() : result.TryGetProperty("verified_name", out var verifiedName) ? verifiedName.GetString() : item.DisplayName;
         item.Status = "Connected";
@@ -1963,6 +2066,13 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
     return Results.Ok(new { accepted = true });
 });
 
+
+app.MapPost("/api/webhooks/bale/{connectionId:guid}/{signature}", async (Guid connectionId, string signature,
+    HttpRequest request, MajaziDbContext db, IConfiguration config, CancellationToken ct) =>
+    await ProcessIranianBotWebhookAsync("Bale", connectionId, signature, request, db, config, ct));
+app.MapPost("/api/webhooks/rubika/{connectionId:guid}/{signature}", async (Guid connectionId, string signature,
+    HttpRequest request, MajaziDbContext db, IConfiguration config, CancellationToken ct) =>
+    await ProcessIranianBotWebhookAsync("Rubika", connectionId, signature, request, db, config, ct));
 
 var aiApi = app.MapGroup("/api/organizations/{organizationId:guid}/ai").RequireAuthorization();
 
@@ -3327,6 +3437,42 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         catch (HttpRequestException)
         { return Results.Problem("ارتباط با Meta Messaging API برقرار نشد؛ پیام در سامانه ثبت نشد.", statusCode: 502); }
     }
+    // Official Iranian bot APIs: Bale and Rubika.
+    else if (conversation.ChannelConnection?.Provider is "Bale" or "Rubika")
+    {
+        var channel = conversation.ChannelConnection;
+        if (channel.Status != "Connected" || string.IsNullOrWhiteSpace(channel.EncryptedAccessToken))
+            return Results.Conflict(new { error = $"ربات {channel.Provider} متصل و تأییدشده نیست." });
+        if (string.IsNullOrWhiteSpace(conversation.ExternalConversationId) || conversation.ExternalConversationId.Length > 180)
+            return Results.Conflict(new { error = "شناسه گفتگوی پیام‌رسان معتبر نیست؛ مکالمه باید از وب‌هوک رسمی دریافت شده باشد." });
+        string iranianBotToken;
+        try { iranianBotToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
+        var endpoint = channel.Provider == "Bale"
+            ? $"https://tapi.bale.ai/bot{iranianBotToken}/sendMessage"
+            : $"https://botapi.rubika.ir/v3/{iranianBotToken}/sendMessage";
+        try
+        {
+            using var response = await httpClientFactory.CreateClient("TelegramBotApi").PostAsJsonAsync(endpoint,
+                new { chat_id = conversation.ExternalConversationId, text = body }, ct);
+            using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var root = payload.RootElement;
+            var ok = channel.Provider == "Bale"
+                ? response.IsSuccessStatusCode && root.TryGetProperty("ok", out var baleOk) && baleOk.ValueKind == JsonValueKind.True
+                : response.IsSuccessStatusCode && root.TryGetProperty("status", out var rubikaStatus) && rubikaStatus.GetString() == "OK";
+            if (!ok) return Results.Problem($"پیام‌رسان {channel.Provider} ارسال پیام را نپذیرفت؛ شناسه چت و دسترسی ربات را بررسی کنید.", statusCode: 502);
+            var result = root.TryGetProperty("result", out var baleResult) ? baleResult :
+                root.TryGetProperty("data", out var rubikaData) ? rubikaData : root;
+            if (result.TryGetProperty("message_id", out var messageId)) message.ExternalMessageId = messageId.ToString();
+            else if (result.TryGetProperty("message", out var messageNode) && messageNode.TryGetProperty("message_id", out var nestedId))
+                message.ExternalMessageId = nestedId.ToString();
+            message.Status = "Sent"; message.SentAt = DateTimeOffset.UtcNow;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { return Results.Problem($"ارسال پیام به {channel.Provider} timeout شد.", statusCode: 504); }
+        catch (HttpRequestException)
+        { return Results.Problem($"ارتباط با API {channel.Provider} برقرار نشد.", statusCode: 502); }
+    }
     // Telegram replies are delivered synchronously through the official Bot API.
     // Providers without a delivery adapter remain explicitly queued.
     else if (conversation.ChannelConnection?.Provider == "Telegram")
@@ -3512,6 +3658,78 @@ static object IssueToken(AppUser user, IConfiguration config)
     };
     var token = new JwtSecurityToken(issuer, audience, claims, expires: expires, signingCredentials: credentials);
     return new { accessToken = new JwtSecurityTokenHandler().WriteToken(token), tokenType = "Bearer", expiresAt = expires };
+}
+
+static string BotWebhookSignature(string signingKey, Guid connectionId, string provider) =>
+    Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey), Encoding.UTF8.GetBytes($"majazi:{provider}:{connectionId:D}"))).ToLowerInvariant();
+
+static async Task<IResult> ProcessIranianBotWebhookAsync(string provider, Guid connectionId, string signature,
+    HttpRequest request, MajaziDbContext db, IConfiguration config, CancellationToken ct)
+{
+    var signingKey = config["Jwt:SigningKey"];
+    if (string.IsNullOrWhiteSpace(signingKey)) return Results.Problem(statusCode: 503);
+    var expected = BotWebhookSignature(signingKey, connectionId, provider);
+    var suppliedBytes = Encoding.UTF8.GetBytes(signature);
+    var expectedBytes = Encoding.UTF8.GetBytes(expected);
+    if (suppliedBytes.Length != expectedBytes.Length || !CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes))
+        return Results.Unauthorized();
+    using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+    var root = doc.RootElement;
+    JsonElement message;
+    string? chatId = null, externalId = null, body = null, senderName = null;
+    DateTimeOffset receivedAt = DateTimeOffset.UtcNow;
+    if (provider == "Bale")
+    {
+        if (!root.TryGetProperty("message", out message) && !root.TryGetProperty("edited_message", out message))
+            return Results.Ok(new { accepted = true, ignored = true });
+        if (!message.TryGetProperty("chat", out var chat) || !chat.TryGetProperty("id", out var chatValue) ||
+            !message.TryGetProperty("message_id", out var messageValue)) return Results.BadRequest();
+        chatId = chatValue.ToString(); externalId = messageValue.ToString();
+        body = message.TryGetProperty("text", out var textValue) ? textValue.GetString() :
+            message.TryGetProperty("caption", out var caption) ? caption.GetString() : null;
+        senderName = message.TryGetProperty("from", out var from)
+            ? string.Join(" ", new[] { from.TryGetProperty("first_name", out var first) ? first.GetString() : null,
+                from.TryGetProperty("last_name", out var last) ? last.GetString() : null }.Where(x => !string.IsNullOrWhiteSpace(x))) : null;
+        if (message.TryGetProperty("date", out var date) && date.TryGetInt64(out var unix)) receivedAt = DateTimeOffset.FromUnixTimeSeconds(unix);
+    }
+    else
+    {
+        if (!root.TryGetProperty("update", out var update) ||
+            !update.TryGetProperty("new_message", out message)) return Results.Ok(new { accepted = true, ignored = true });
+        chatId = update.TryGetProperty("chat_id", out var chat) ? chat.ToString() : null;
+        externalId = message.TryGetProperty("message_id", out var mid) ? mid.ToString() : null;
+        body = message.TryGetProperty("text", out var textValue) ? textValue.GetString() : null;
+        senderName = message.TryGetProperty("sender_id", out var sender) ? sender.ToString() : null;
+        if (message.TryGetProperty("time", out var time) && long.TryParse(time.ToString(), out var unix))
+        { try { receivedAt = DateTimeOffset.FromUnixTimeSeconds(unix); } catch (ArgumentOutOfRangeException) { } }
+    }
+    if (string.IsNullOrWhiteSpace(chatId) || string.IsNullOrWhiteSpace(externalId) || string.IsNullOrWhiteSpace(body))
+        return Results.Ok(new { accepted = true, ignored = true });
+    if (body.Length > 10000) body = body[..10000];
+    var channel = await db.SocialChannelConnections.SingleOrDefaultAsync(
+        x => x.Id == connectionId && x.Provider == provider && x.Status == "Connected", ct);
+    if (channel is null) return Results.NotFound();
+    var conversation = await db.InboxConversations.SingleOrDefaultAsync(
+        x => x.ChannelConnectionId == connectionId && x.ExternalConversationId == chatId, ct);
+    if (conversation is null)
+    {
+        conversation = new InboxConversation { OrganizationId = channel.OrganizationId, ChannelConnectionId = channel.Id,
+            ExternalConversationId = chatId, Subject = string.IsNullOrWhiteSpace(senderName) ? $"{provider} {chatId}" : senderName,
+            Status = "Open" };
+        db.InboxConversations.Add(conversation);
+        await db.SaveChangesAsync(ct);
+    }
+    if (await db.InboxMessages.AnyAsync(x => x.ConversationId == conversation.Id && x.ExternalMessageId == externalId, ct))
+        return Results.Ok(new { accepted = true, duplicate = true });
+    var inboxMessage = new InboxMessage { ConversationId = conversation.Id, ExternalMessageId = externalId,
+        Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt, ProviderPayload = JsonSerializer.Serialize(root) };
+    db.InboxMessages.Add(inboxMessage);
+    await QueueAutomationRunsAsync(db, channel.OrganizationId, "InboxMessageReceived", "InboxMessage", inboxMessage.Id,
+        new { messageBody = body, conversationSubject = conversation.Subject, channel = provider }, ct);
+    conversation.LastMessageAt = receivedAt; conversation.UpdatedAt = DateTimeOffset.UtcNow;
+    if (conversation.Status.Equals("resolved", StringComparison.OrdinalIgnoreCase)) conversation.Status = "open";
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { accepted = true });
 }
 
 static string TelegramWebhookSignature(string signingKey, Guid connectionId) =>
