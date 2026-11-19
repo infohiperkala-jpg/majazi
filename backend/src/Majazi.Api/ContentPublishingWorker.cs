@@ -83,7 +83,33 @@ public sealed class ContentPublishingWorker(
                         throw new InvalidOperationException("شناسه Phone Number ID برای اتصال واتساپ ثبت نشده است.");
                     var attachment = await db.ContentDraftAttachments.AsNoTracking()
                         .SingleOrDefaultAsync(x => x.DraftId == draft.Id, ct);
-                    if (attachment is null)
+                    if (draft.WhatsAppTemplateName is not null)
+                    {
+                        if (attachment is not null)
+                            throw new InvalidOperationException("قالب واتساپ را نمی‌توان همراه پیوست رسانه‌ای ارسال کرد.");
+                        using var components = JsonDocument.Parse(draft.WhatsAppTemplateComponents ?? "[]");
+                        using var outbound = new HttpRequestMessage(HttpMethod.Post,
+                            $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(phoneNumberId)}/messages");
+                        outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                        outbound.Content = JsonContent.Create(new
+                        {
+                            messaging_product = "whatsapp", recipient_type = "individual",
+                            to = draft.PublishTarget!.Trim().TrimStart('+'), type = "template",
+                            template = new
+                            {
+                                name = draft.WhatsAppTemplateName,
+                                language = new { code = draft.WhatsAppTemplateLanguage ?? "en_US" },
+                                components = components.RootElement
+                            }
+                        });
+                        using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
+                        if (!response.IsSuccessStatusCode)
+                            throw new InvalidOperationException("Meta قالب واتساپ را نپذیرفت؛ نام، زبان، وضعیت تأیید قالب و پارامترها را بررسی کنید.");
+                        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                        if (!json.RootElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() == 0)
+                            throw new InvalidOperationException("WhatsApp شناسه پیام قالبی ارسالی را برنگرداند.");
+                    }
+                    else if (attachment is null)
                     {
                         using var outbound = new HttpRequestMessage(HttpMethod.Post,
                             $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(phoneNumberId)}/messages");
