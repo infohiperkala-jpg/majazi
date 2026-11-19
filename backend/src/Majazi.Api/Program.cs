@@ -707,6 +707,216 @@ crmApi.MapPost("/activities", async (Guid organizationId, CrmActivityRequest req
 });
 
 
+var ordersApi = app.MapGroup("/api/organizations/{organizationId:guid}/orders").RequireAuthorization();
+var orderStatuses = new HashSet<string>(["Draft", "Confirmed", "Processing", "Completed", "Cancelled"]);
+var paymentMethods = new HashSet<string>(["Cash", "BankTransfer", "Card", "Gateway", "Other"]);
+var paymentStatuses = new HashSet<string>(["Pending", "Paid", "Failed", "Refunded"]);
+
+ordersApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    string? status, string? q, int? page, int? pageSize, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var currentPage = Math.Clamp(page ?? 1, 1, 100000);
+    var size = Math.Clamp(pageSize ?? 30, 10, 100);
+    var query = db.SalesOrders.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(x => x.Status == status);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        if (term.Length > 120) return Results.BadRequest(new { error = "عبارت جست‌وجو بیش از حد طولانی است." });
+        query = query.Where(x => x.OrderNumber.Contains(term) || (x.Notes != null && x.Notes.Contains(term)) ||
+            (x.Contact != null && (x.Contact.FullName.Contains(term) || (x.Contact.Email != null && x.Contact.Email.Contains(term)))));
+    }
+    var total = await query.CountAsync(ct);
+    var items = await query.OrderByDescending(x => x.CreatedAt).Skip((currentPage - 1) * size).Take(size)
+        .Select(x => new
+        {
+            x.Id, x.OrderNumber, x.Status, x.Currency, x.Subtotal, x.Discount, x.Tax, x.Total, x.Version, x.CreatedAt, x.UpdatedAt,
+            x.ContactId, ContactName = x.Contact == null ? null : x.Contact.FullName,
+            LineCount = db.SalesOrderLines.Count(l => l.OrderId == x.Id),
+            Paid = db.PaymentTransactions.Where(p => p.OrderId == x.Id && p.Status == "Paid").Sum(p => (decimal?)p.Amount) ?? 0,
+            Refunded = db.PaymentTransactions.Where(p => p.OrderId == x.Id && p.Status == "Refunded").Sum(p => (decimal?)p.Amount) ?? 0
+        }).ToListAsync(ct);
+    return Results.Ok(new { items = items.Select(x => new { x.Id, x.OrderNumber, x.Status, x.Currency, x.Subtotal, x.Discount, x.Tax, x.Total, x.Version, x.CreatedAt, x.UpdatedAt, x.ContactId, x.ContactName, x.LineCount, x.Paid, x.Refunded, BalanceDue = Math.Max(0, x.Total - x.Paid + x.Refunded) }), total, page = currentPage, pageSize = size });
+});
+
+ordersApi.MapGet("/{orderId:guid}", async (Guid organizationId, Guid orderId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var order = await db.SalesOrders.AsNoTracking().Where(x => x.Id == orderId && x.OrganizationId == organizationId)
+        .Select(x => new { x.Id, x.OrderNumber, x.ContactId, ContactName = x.Contact == null ? null : x.Contact.FullName,
+            x.Status, x.Currency, x.Subtotal, x.Discount, x.Tax, x.Total, x.Notes, x.Version, x.CreatedByUserId, x.CreatedAt, x.UpdatedAt })
+        .SingleOrDefaultAsync(ct);
+    if (order is null) return Results.NotFound();
+    var lines = await db.SalesOrderLines.AsNoTracking().Where(x => x.OrderId == orderId).OrderBy(x => x.SortOrder)
+        .Select(x => new { x.Id, x.Name, x.Sku, x.Quantity, x.UnitPrice, x.Discount, x.LineTotal, x.SortOrder }).ToListAsync(ct);
+    var payments = await db.PaymentTransactions.AsNoTracking().Where(x => x.OrderId == orderId).OrderByDescending(x => x.CreatedAt)
+        .Select(x => new { x.Id, x.Amount, x.Method, x.Status, x.Reference, x.Note, x.PaidAt, x.CreatedAt }).ToListAsync(ct);
+    var paid = payments.Where(x => x.Status == "Paid").Sum(x => x.Amount);
+    var refunded = payments.Where(x => x.Status == "Refunded").Sum(x => x.Amount);
+    return Results.Ok(new { order, lines, payments, paid, refunded, balanceDue = Math.Max(0, order.Total - paid + refunded) });
+});
+
+ordersApi.MapPost("/", async (Guid organizationId, SalesOrderRequest request, ClaimsPrincipal principal,
+    MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var lines = request.Lines ?? [];
+    var currency = (request.Currency ?? "IRR").Trim().ToUpperInvariant();
+    if (lines.Count is < 1 or > 50 || currency.Length != 3 || !currency.All(char.IsAsciiLetter) ||
+        request.Discount < 0 || request.Tax < 0 || (request.Notes?.Length ?? 0) > 4000)
+        return Results.BadRequest(new { error = "حداقل یک ردیف کالا، ارز سه‌حرفی و مقادیر مالی معتبر الزامی است." });
+    if (request.ContactId is Guid contactId && !await db.CrmContacts.AnyAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "مخاطب انتخاب‌شده متعلق به این سازمان نیست." });
+    var calculated = new List<SalesOrderLine>();
+    decimal subtotal = 0;
+    foreach (var (line, index) in lines.Select((value, index) => (value, index)))
+    {
+        var name = line.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 240 || (line.Sku?.Length ?? 0) > 100 ||
+            line.Quantity <= 0 || line.Quantity > 1000000 || line.UnitPrice < 0 || line.UnitPrice > 9999999999999999m ||
+            line.Discount < 0 || line.Discount > line.Quantity * line.UnitPrice)
+            return Results.BadRequest(new { error = "نام، تعداد، قیمت یا تخفیف یکی از ردیف‌ها معتبر نیست." });
+        var gross = Math.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        var lineDiscount = Math.Round(line.Discount, 2, MidpointRounding.AwayFromZero);
+        var lineTotal = gross - lineDiscount;
+        subtotal += lineTotal;
+        calculated.Add(new SalesOrderLine { Name = name, Sku = Clean(line.Sku), Quantity = Math.Round(line.Quantity, 3), UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
+    }
+    var discount = Math.Round(request.Discount, 2);
+    var tax = Math.Round(request.Tax, 2);
+    if (discount > subtotal || subtotal - discount + tax > 9999999999999999m)
+        return Results.BadRequest(new { error = "مبلغ تخفیف یا مبلغ نهایی خارج از محدوده معتبر است." });
+    var order = new SalesOrder
+    {
+        OrganizationId = organizationId, ContactId = request.ContactId,
+        OrderNumber = "MZ-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant(),
+        Currency = currency, Subtotal = subtotal, Discount = discount, Tax = tax, Total = subtotal - discount + tax,
+        Notes = Clean(request.Notes), CreatedByUserId = userId.Value
+    };
+    db.SalesOrders.Add(order);
+    foreach (var line in calculated) line.OrderId = order.Id;
+    db.SalesOrderLines.AddRange(calculated);
+    RecordAuditEvent(db, organizationId, userId.Value, "order.created", "SalesOrder", order.Id, "سفارش جدید ثبت شد.", new { order.OrderNumber, order.Total, order.Currency, lineCount = calculated.Count });
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateException) { return Results.Conflict(new { error = "شماره سفارش تکراری شد؛ دوباره تلاش کنید." }); }
+    return Results.Created($"/api/organizations/{organizationId}/orders/{order.Id}", new { order.Id, order.OrderNumber, order.Status, order.Currency, order.Subtotal, order.Discount, order.Tax, order.Total, order.Version, order.CreatedAt });
+});
+
+ordersApi.MapPut("/{orderId:guid}", async (Guid organizationId, Guid orderId, SalesOrderRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var order = await db.SalesOrders.SingleOrDefaultAsync(x => x.Id == orderId && x.OrganizationId == organizationId, ct);
+    if (order is null) return Results.NotFound();
+    if (order.Status != "Draft") return Results.Conflict(new { error = "فقط سفارش پیش‌نویس قابل ویرایش است." });
+    if (request.Version != order.Version) return Results.Conflict(new { error = "سفارش توسط کاربر دیگری تغییر کرده است؛ اطلاعات را تازه‌سازی کنید." });
+    var lines = request.Lines ?? [];
+    var currency = (request.Currency ?? order.Currency).Trim().ToUpperInvariant();
+    if (lines.Count is < 1 or > 50 || currency.Length != 3 || !currency.All(char.IsAsciiLetter) ||
+        request.Discount < 0 || request.Tax < 0 || (request.Notes?.Length ?? 0) > 4000)
+        return Results.BadRequest(new { error = "ردیف‌ها یا مقادیر مالی معتبر نیستند." });
+    if (request.ContactId is Guid contactId && !await db.CrmContacts.AnyAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "مخاطب انتخاب‌شده متعلق به این سازمان نیست." });
+    var calculated = new List<SalesOrderLine>(); decimal subtotal = 0;
+    foreach (var (line, index) in lines.Select((value, index) => (value, index)))
+    {
+        var name = line.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 240 || (line.Sku?.Length ?? 0) > 100 ||
+            line.Quantity <= 0 || line.Quantity > 1000000 || line.UnitPrice < 0 || line.UnitPrice > 9999999999999999m ||
+            line.Discount < 0 || line.Discount > line.Quantity * line.UnitPrice)
+            return Results.BadRequest(new { error = "نام، تعداد، قیمت یا تخفیف یکی از ردیف‌ها معتبر نیست." });
+        var gross = Math.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        var lineDiscount = Math.Round(line.Discount, 2);
+        var lineTotal = gross - lineDiscount; subtotal += lineTotal;
+        calculated.Add(new SalesOrderLine { OrderId = order.Id, Name = name, Sku = Clean(line.Sku), Quantity = Math.Round(line.Quantity, 3), UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
+    }
+    var discount = Math.Round(request.Discount, 2); var tax = Math.Round(request.Tax, 2);
+    if (discount > subtotal || subtotal - discount + tax > 9999999999999999m)
+        return Results.BadRequest(new { error = "مبلغ تخفیف یا مبلغ نهایی معتبر نیست." });
+    order.ContactId = request.ContactId; order.Currency = currency; order.Subtotal = subtotal; order.Discount = discount;
+    order.Tax = tax; order.Total = subtotal - discount + tax; order.Notes = Clean(request.Notes);
+    order.Version++; order.UpdatedAt = DateTimeOffset.UtcNow;
+    var oldLines = await db.SalesOrderLines.Where(x => x.OrderId == orderId).ToListAsync(ct);
+    db.SalesOrderLines.RemoveRange(oldLines); db.SalesOrderLines.AddRange(calculated);
+    RecordAuditEvent(db, organizationId, userId.Value, "order.updated", "SalesOrder", order.Id, "پیش‌نویس سفارش ویرایش شد.", new { order.Version, order.Total });
+    try { await db.SaveChangesAsync(ct); }
+    catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "سفارش هم‌زمان تغییر کرده است؛ صفحه را تازه‌سازی کنید." }); }
+    return Results.Ok(new { order.Id, order.OrderNumber, order.Status, order.Currency, order.Total, order.Version, order.UpdatedAt });
+});
+
+ordersApi.MapPatch("/{orderId:guid}/status", async (Guid organizationId, Guid orderId, SalesOrderStatusRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var order = await db.SalesOrders.SingleOrDefaultAsync(x => x.Id == orderId && x.OrganizationId == organizationId, ct);
+    if (order is null) return Results.NotFound();
+    var next = request.Status?.Trim();
+    var allowed = order.Status switch
+    {
+        "Draft" => new[] { "Confirmed", "Cancelled" },
+        "Confirmed" => new[] { "Processing", "Cancelled" },
+        "Processing" => new[] { "Completed", "Cancelled" },
+        _ => Array.Empty<string>()
+    };
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId).Select(x => x.Role).SingleAsync(ct);
+    if (next is null || !allowed.Contains(next) || (next == "Cancelled" && role is not ("Owner" or "Admin")))
+        return Results.BadRequest(new { error = "انتقال وضعیت سفارش مجاز نیست." });
+    var previous = order.Status; order.Status = next; order.Version++; order.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "order.status_changed", "SalesOrder", order.Id, "وضعیت سفارش تغییر کرد.", new { previous, next });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { order.Id, order.Status, order.Version, order.UpdatedAt });
+});
+
+ordersApi.MapPost("/{orderId:guid}/payments", async (Guid organizationId, Guid orderId, PaymentTransactionRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var order = await db.SalesOrders.SingleOrDefaultAsync(x => x.Id == orderId && x.OrganizationId == organizationId, ct);
+    if (order is null) return Results.NotFound();
+    var method = request.Method?.Trim(); var paymentStatus = request.Status?.Trim();
+    if (order.Status is "Draft" or "Cancelled" || request.Amount <= 0 || request.Amount > 9999999999999999m ||
+        method is null || !paymentMethods.Contains(method) || paymentStatus is null || !paymentStatuses.Contains(paymentStatus) ||
+        (request.Reference?.Length ?? 0) > 180 || (request.Note?.Length ?? 0) > 1000)
+        return Results.BadRequest(new { error = "سفارش یا اطلاعات پرداخت معتبر نیست." });
+    var paid = await db.PaymentTransactions.Where(x => x.OrderId == orderId && x.Status == "Paid").SumAsync(x => (decimal?)x.Amount, ct) ?? 0;
+    var refunded = await db.PaymentTransactions.Where(x => x.OrderId == orderId && x.Status == "Refunded").SumAsync(x => (decimal?)x.Amount, ct) ?? 0;
+    if (paymentStatus == "Paid" && request.Amount > order.Total - paid + refunded)
+        return Results.BadRequest(new { error = "مبلغ پرداخت از مانده قابل پرداخت بیشتر است." });
+    if (paymentStatus == "Refunded" && request.Amount > paid - refunded)
+        return Results.BadRequest(new { error = "مبلغ بازپرداخت از مبلغ پرداخت‌شده خالص بیشتر است." });
+    var payment = new PaymentTransaction
+    {
+        OrderId = orderId, Amount = Math.Round(request.Amount, 2), Method = method, Status = paymentStatus,
+        Reference = Clean(request.Reference), Note = Clean(request.Note), PaidAt = paymentStatus == "Paid" ? DateTimeOffset.UtcNow : null,
+        CreatedByUserId = userId.Value
+    };
+    db.PaymentTransactions.Add(payment);
+    RecordAuditEvent(db, organizationId, userId.Value, "order.payment_recorded", "PaymentTransaction", payment.Id, "رویداد مالی سفارش ثبت شد.", new { payment.Amount, payment.Method, payment.Status });
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/orders/{orderId}", new { payment.Id, payment.Amount, payment.Method, payment.Status, payment.PaidAt, payment.CreatedAt });
+});
+
+ordersApi.MapDelete("/{orderId:guid}", async (Guid organizationId, Guid orderId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var order = await db.SalesOrders.SingleOrDefaultAsync(x => x.Id == orderId && x.OrganizationId == organizationId, ct);
+    if (order is null) return Results.NotFound();
+    if (order.Status != "Draft" || await db.PaymentTransactions.AnyAsync(x => x.OrderId == orderId, ct))
+        return Results.Conflict(new { error = "فقط سفارش پیش‌نویس بدون سابقه پرداخت قابل حذف است." });
+    db.SalesOrders.Remove(order);
+    RecordAuditEvent(db, organizationId, userId.Value, "order.deleted", "SalesOrder", order.Id, "پیش‌نویس سفارش حذف شد.");
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
 var campaignStatuses = new HashSet<string>(["Draft", "Scheduled", "Active", "Paused", "Completed", "Cancelled"]);
 var campaignChannels = new HashSet<string>(["Website", "Instagram", "Telegram", "Email", "SMS", "Ads", "Offline", "Other"]);
 var campaignsApi = app.MapGroup("/api/organizations/{organizationId:guid}/campaigns").RequireAuthorization();
@@ -2759,4 +2969,8 @@ public sealed record KnowledgeArticleRequest(string? Title, string? Slug, string
 public sealed record KnowledgeArticleStatusRequest(string? Status);
 public sealed record KnowledgeRestoreRequest(int Version, string? ChangeNote);
 public sealed record OrganizationAiProviderSettingsRequest(string? BaseUrl, string? Model, string? ApiKey, bool ClearApiKey, bool IsEnabled);
+public sealed record SalesOrderLineRequest(string? Name, string? Sku, decimal Quantity, decimal UnitPrice, decimal Discount);
+public sealed record SalesOrderRequest(Guid? ContactId, string? Currency, decimal Discount, decimal Tax, string? Notes, List<SalesOrderLineRequest>? Lines, int Version = 0);
+public sealed record SalesOrderStatusRequest(string? Status);
+public sealed record PaymentTransactionRequest(decimal Amount, string? Method, string? Status, string? Reference, string? Note);
 public sealed record AiProviderConfig(string? ApiKey, string? BaseUrl, string? Model, bool Enabled, bool OrganizationConfigured);
