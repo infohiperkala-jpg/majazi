@@ -1407,14 +1407,14 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
         return Results.BadRequest(new { error = "برای این کانال توکن ربات ثبت نشده است." });
     if (item.Provider is "Bale" or "Rubika")
     {
-        string botToken;
-        try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
+        string verifiedBotToken;
+        try { verifiedBotToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken); }
         catch (CryptographicException) { return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اعتبارنامه را دوباره ثبت کنید." }); }
         try
         {
             var url = item.Provider == "Bale"
-                ? $"https://tapi.bale.ai/bot{botToken}/getMe"
-                : $"https://botapi.rubika.ir/v3/{botToken}/getMe";
+                ? $"https://tapi.bale.ai/bot{verifiedBotToken}/getMe"
+                : $"https://botapi.rubika.ir/v3/{verifiedBotToken}/getMe";
             using var response = await httpClientFactory.CreateClient("TelegramBotApi").PostAsJsonAsync(url, new { }, ct);
             using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
             var root = payload.RootElement;
