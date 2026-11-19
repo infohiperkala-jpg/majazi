@@ -164,3 +164,37 @@ public sealed class InboxMessage
     public string? ProviderPayload { get; set; }
     public InboxConversation? Conversation { get; set; }
 }
+
+
+public sealed class ContentDraft
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BrandId { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public string Title { get; set; } = "";
+    public string Content { get; set; } = "";
+    public string Channel { get; set; } = "General";
+    public string Tone { get; set; } = "Professional";
+    public string Status { get; set; } = "Draft";
+    public string? Prompt { get; set; }
+    public string? AiModel { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ApprovedAt { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public ICollection<ContentDraftVersion> Versions { get; set; } = new List<ContentDraftVersion>();
+}
+
+public sealed class ContentDraftVersion
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid DraftId { get; set; }
+    public int VersionNumber { get; set; }
+    public string Title { get; set; } = "";
+    public string Content { get; set; } = "";
+    public string ChangeNote { get; set; } = "ویرایش";
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public ContentDraft? Draft { get; set; }
+}
