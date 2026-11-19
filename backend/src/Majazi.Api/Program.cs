@@ -368,11 +368,12 @@ app.MapDelete("/api/brands/{id:guid}", async (Guid id, ClaimsPrincipal principal
 
 const string statusKeyPattern = "^[a-z0-9][a-z0-9._-]{0,63}$";
 var statusesApi = app.MapGroup("/api/organizations/{organizationId:guid}/statuses").RequireAuthorization();
-var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign"]);
+var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign", "inbox.conversation"]);
 var defaultStatusesByModule = new Dictionary<string, (string Key, string Label, string Color)[]>
 {
     ["crm.lead"] = [("new", "جدید", "#64748b"), ("qualified", "ارزیابی‌شده", "#2563eb"), ("proposal", "پیشنهاد", "#7c3aed"), ("negotiation", "مذاکره", "#d97706"), ("won", "موفق", "#16a34a"), ("lost", "از دست‌رفته", "#dc2626")],
     ["campaign"] = [("draft", "پیش‌نویس", "#64748b"), ("scheduled", "زمان‌بندی‌شده", "#2563eb"), ("active", "فعال", "#16a34a"), ("paused", "متوقف", "#d97706"), ("completed", "پایان‌یافته", "#0f766e"), ("cancelled", "لغوشده", "#dc2626")],
+    ["inbox.conversation"] = [("open", "باز", "#2563eb"), ("pending", "در انتظار پاسخ", "#d97706"), ("resolved", "بسته‌شده", "#16a34a")],
 };
 
 statusesApi.MapGet("/", async (Guid organizationId, string? module, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
@@ -1665,7 +1666,7 @@ inboxApi.MapGet("/conversations", async (Guid organizationId, ClaimsPrincipal pr
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var query = db.InboxConversations.AsNoTracking().Where(x => x.OrganizationId == organizationId);
     if (!string.IsNullOrWhiteSpace(status) && status != "All")
-        query = query.Where(x => x.Status == status);
+        query = query.Where(x => x.Status.ToLower() == status.ToLower());
     if (!string.IsNullOrWhiteSpace(q))
     {
         var term = q.Trim();
@@ -1826,8 +1827,9 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
     if (item is null) return Results.NotFound();
     if (request.Status is not null)
     {
-        if (request.Status is not ("Open" or "Pending" or "Resolved"))
-            return Results.BadRequest(new { error = "وضعیت مکالمه معتبر نیست." });
+        if (!await IsAllowedConfiguredStatus(db, organizationId, "inbox.conversation", request.Status,
+            new HashSet<string>(["Open", "Pending", "Resolved"]), ct))
+            return Results.BadRequest(new { error = "وضعیت مکالمه معتبر یا فعال نیست." });
         item.Status = request.Status;
     }
     if (request.AssignedToUserId.HasValue)
