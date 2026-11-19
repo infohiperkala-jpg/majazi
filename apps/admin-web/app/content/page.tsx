@@ -28,13 +28,14 @@ export default function ContentStudioPage(){
  const base="/api/organizations/"+org+"/content";
  async function refresh(access=token,organization=org){
   if(!access||!organization)return;
-  const [drafts,aiStatus,brandList,publishTargets]=await Promise.all([
+  const [drafts,aiStatus,brandList,publishTargets,calendar]=await Promise.all([
    api<Draft[]>("/api/organizations/"+organization+"/content/drafts?status="+filter+"&q="+encodeURIComponent(query),access),
    api<AIStatus>("/api/organizations/"+organization+"/content/ai/status",access),
    api<Brand[]>("/api/organizations/"+organization+"/brands",access),
-   api<PublishTarget[]>("/api/organizations/"+organization+"/content/publish-targets",access)
+   api<PublishTarget[]>("/api/organizations/"+organization+"/content/publish-targets",access),
+   api<{items:CalendarItem[]}>("/api/organizations/"+organization+"/content/calendar",access)
   ]);
-  setItems(drafts);setAi(aiStatus);setBrands(brandList);setTargets(publishTargets);if(!connectionId&&publishTargets.length)setConnectionId(publishTargets[0].id);
+  setItems(drafts);setAi(aiStatus);setBrands(brandList);setTargets(publishTargets);setCalendarItems(calendar.items);if(!connectionId&&publishTargets.length)setConnectionId(publishTargets[0].id);
   if(selected&&!drafts.some(x=>x.id===selected)){setSelected("");setDetail(null);}
  }
  async function openDraft(id:string){
