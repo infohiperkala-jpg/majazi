@@ -1358,7 +1358,7 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
 });
 
 channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizationId, Guid connectionId,
-    ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection, IHttpClientFactory clients, CancellationToken ct) =>
+    ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection, IHttpClientFactory clients, IConfiguration config, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
@@ -2916,7 +2916,7 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
 
 inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid organizationId, Guid conversationId,
     CreateInboxMessageRequest request, ClaimsPrincipal principal, MajaziDbContext db,
-    IDataProtectionProvider protection, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
+    IDataProtectionProvider protection, IHttpClientFactory httpClientFactory, IConfiguration config, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
@@ -2948,13 +2948,13 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         string tokenValue;
         try { tokenValue = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
         catch (CryptographicException) { return Results.Conflict(new { error = "توکن WhatsApp قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
-        var version = "v22.0";
+        var version = config["Meta:GraphApiVersion"] ?? "v22.0";
         try
         {
             using var outbound = new HttpRequestMessage(HttpMethod.Post, $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(channel.ExternalAccountId)}/messages");
             outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenValue);
             outbound.Content = JsonContent.Create(new { messaging_product = "whatsapp", recipient_type = "individual",
-                to = conversation.ExternalConversationId, type = "text", text = new { preview_url = false, body } });
+                to = conversation.ExternalConversationId.TrimStart('+'), type = "text", text = new { preview_url = false, body } });
             using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
             using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
             if (!response.IsSuccessStatusCode)
