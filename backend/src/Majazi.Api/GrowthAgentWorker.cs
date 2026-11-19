@@ -35,7 +35,7 @@ public sealed class GrowthAgentWorker(
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MajaziDbContext>();
-        var today = DateTimeOffset.UtcNow.Date;
+        var today = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
         var ids = await db.Organizations.AsNoTracking()
             .Where(x => x.GrowthAgentEnabled && (x.GrowthAgentLastRunAt == null || x.GrowthAgentLastRunAt < today))
             .OrderBy(x => x.GrowthAgentLastRunAt).Select(x => x.Id).Take(20).ToListAsync(ct);
