@@ -245,6 +245,8 @@ public sealed class TextTemplate
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class AutomationRule
 {
     public Guid Id { get; set; } = Guid.NewGuid();
