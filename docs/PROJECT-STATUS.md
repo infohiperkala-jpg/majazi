@@ -17,7 +17,7 @@
 | رابط فارسی CRM | Implemented (MVP) | صفحه مستقل `/crm` و دسترسی از داشبورد |
 | عوامل هوش مصنوعی | Planned | اتصال provider و مدیریت agent |
 | زیرساخت اتصال کانال‌ها | Implemented | ثبت اتصال سازمانی اینستاگرام، فیسبوک و تلگرام؛ رمزنگاری توکن؛ حذف اتصال؛ اعتبارسنجی زنده ربات تلگرام از طریق `getMe` و نمایش وضعیت تأییدشده |
-| اتصال Instagram Business Login | Implemented (configuration required) | OAuth کد مجوز، state تصادفی یک‌بارمصرف و محدود به سازمان/کاربر، تبدیل توکن کوتاه‌مدت به بلندمدت و ذخیره رمز‌شده؛ نیازمند App ID/Secret و Redirect URI در Meta Developer Dashboard |\n| اتصال Facebook، وب‌هوک و دریافت آمار | Planned | اتصال Facebook و دریافت رویدادها و شاخص‌ها در مرحله بعد |
+| اتصال Instagram Business Login | Implemented (configuration required) | OAuth کد مجوز، state تصادفی یک‌بارمصرف و محدود به سازمان/کاربر، تبدیل توکن کوتاه‌مدت به بلندمدت و ذخیره رمز‌شده؛ نیازمند App ID/Secret و Redirect URI در Meta Developer Dashboard |\n| دریافت پیام تلگرام با وب‌هوک | Implemented (configuration required) | ثبت وب‌هوک اختصاصی هر ربات با secret token و امضای مسیر؛ دریافت پیام، ثبت idempotent در صندوق ورودی و ارسال پاسخ از طریق Bot API؛ نیازمند `PUBLIC_BASE_URL` عمومی HTTPS و فعال‌سازی وب‌هوک از صفحه کانال‌ها |\n| اتصال Facebook و دریافت آمار | Planned | اتصال Facebook و دریافت رویدادها و شاخص‌ها در مرحله بعد |
 | اتوماسیون و گزارش‌های تحلیلی | Planned | گردش‌کارها و داشبورد KPI |
 
 ## ملاحظات فنی
