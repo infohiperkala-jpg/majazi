@@ -67,7 +67,7 @@ public sealed class ContentPublishingWorker(
                     (x.Provider == "Telegram" || x.Provider == "Eitaa" || x.Provider == "WhatsApp") && x.Status == "Connected", ct);
                 if (connection?.EncryptedAccessToken is null)
                     throw new InvalidOperationException("اتصال پیام‌رسان انتخاب‌شده دیگر فعال نیست.");
-                if (connection.Provider is "Telegram" or "WhatsApp" && draft.Content.Length > 4096)
+                if ((connection.Provider is "Telegram" or "WhatsApp") && draft.Content.Length > 4096)
                     throw new InvalidOperationException("متن بیش از محدودیت ۴۰۹۶ نویسه پیام‌رسان است؛ محتوا را کوتاه کنید.");
                 if (draft.Channel != connection.Provider)
                     throw new InvalidOperationException("پلتفرم پیش‌نویس با اتصال انتشار یکسان نیست.");
