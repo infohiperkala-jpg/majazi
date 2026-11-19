@@ -2027,7 +2027,7 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
     var body = telegramMessage.TryGetProperty("text", out var textElement) ? textElement.GetString() :
         telegramMessage.TryGetProperty("caption", out var captionElement) ? captionElement.GetString() : null;
     var telegramMediaTypes = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
-    var mediaTypeForMessage = telegramMediaTypes.FirstOrDefault(telegramMessage.TryGetProperty);
+    var mediaTypeForMessage = telegramMediaTypes.FirstOrDefault(name => telegramMessage.TryGetProperty(name, out _));
     if (string.IsNullOrWhiteSpace(body) && mediaTypeForMessage is not null)
         body = mediaTypeForMessage switch
         {
@@ -3470,7 +3470,7 @@ inboxApi.MapGet("/conversations/{conversationId:guid}/messages", async (Guid org
                 else
                 {
                     var telegramTypes = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
-                    mediaType = telegramTypes.FirstOrDefault(root.TryGetProperty);
+                    mediaType = telegramTypes.FirstOrDefault(name => root.TryGetProperty(name, out _));
                     if (mediaType is not null && root.TryGetProperty(mediaType, out var telegramMedia))
                     {
                         var file = telegramMedia.ValueKind == JsonValueKind.Array && telegramMedia.GetArrayLength() > 0
@@ -3513,7 +3513,7 @@ inboxApi.MapGet("/messages/{messageId:guid}/media", async (Guid organizationId, 
             using var payload = JsonDocument.Parse(message.ProviderPayload);
             var root = payload.RootElement;
             var candidates = new[] { "photo", "video", "audio", "voice", "document", "animation", "sticker", "video_note" };
-            mediaType = candidates.FirstOrDefault(root.TryGetProperty) ?? "";
+            mediaType = candidates.FirstOrDefault(name => root.TryGetProperty(name, out _)) ?? "";
             if (string.IsNullOrEmpty(mediaType) || !root.TryGetProperty(mediaType, out var media))
                 return Results.NotFound();
             JsonElement file;
