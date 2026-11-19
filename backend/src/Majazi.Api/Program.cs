@@ -595,7 +595,7 @@ crmApi.MapGet("/leads", async (Guid organizationId, ClaimsPrincipal principal, M
     if (!string.IsNullOrWhiteSpace(stage)) query = query.Where(x => x.Stage == stage);
     var items = await query.OrderByDescending(x => x.UpdatedAt).Take(250)
         .Select(x => new { x.Id, x.BrandId, x.ContactId, x.Title, x.Stage, x.EstimatedValue, x.Source, x.Notes, x.CreatedAt, x.UpdatedAt,
-            ContactName = x.Contact == null ? null : x.Contact.FullName }).ToListAsync(ct);
+            ContactName = db.CrmContacts.Where(c => c.Id == x.ContactId && c.OrganizationId == organizationId).Select(c => c.FullName).FirstOrDefault() }).ToListAsync(ct);
     return Results.Ok(items);
 });
 
