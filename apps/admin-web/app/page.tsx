@@ -55,6 +55,7 @@ export default function Home() {
   const [brandSlug, setBrandSlug] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [seedingDemo, setSeedingDemo] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [authReady, setAuthReady] = useState(false);
@@ -178,6 +179,17 @@ export default function Home() {
       setSelectedId(created.id); setOrgName(""); setOrgSlug(""); setNotice("سازمان با موفقیت ثبت شد.");
     } catch (e) { setError(e instanceof Error ? e.message : "ثبت سازمان ناموفق بود."); }
     finally { setSaving(false); }
+  }
+
+  async function createDemoWorkspace() {
+    setSeedingDemo(true); setError(""); setNotice("");
+    try {
+      const result = await api<{ organizationId: string; organization: string; counts: { contacts: number; leads: number; activities: number; campaigns: number; contentDrafts: number; inboxConversations: number } }>("/api/organizations/demo/digibail", { method: "POST" });
+      await loadOrganizations();
+      setSelectedId(result.organizationId);
+      setNotice(`فضای نمونه دیجی‌بایل آماده شد: ${result.counts.contacts} مشتری، ${result.counts.leads} سرنخ، ${result.counts.campaigns} کمپین، ${result.counts.contentDrafts} محتوا و ${result.counts.inboxConversations} گفت‌وگو. داده‌ها آزمایشی‌اند و اتصال جعلی ایجاد نشده است.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "ساخت فضای نمونه انجام نشد."); }
+    finally { setSeedingDemo(false); }
   }
 
   async function addMember(event: FormEvent<HTMLFormElement>) {
@@ -317,7 +329,7 @@ export default function Home() {
         {["Instagram","WhatsApp","Telegram","YouTube","TikTok","Facebook","ایتا","بله","روبیکا","سروش","گپ"].map((channel,i)=><tr key={channel}><td dir={i<6?"ltr":"rtl"}>{channel}</td><td>{i<6?"خارجی":"ایرانی"}</td><td><span className="connection-status">متصل نشده</span></td><td>—</td></tr>)}
       </tbody></table></div></section>
 
-      <div className="section-heading" id="organizations"><div><h2>مدیریت سازمان‌ها و برندها</h2><p>ثبت و مشاهده اطلاعات پایه از طریق API و PostgreSQL</p></div><button className="refresh-button" onClick={() => void loadOrganizations()} disabled={loading}>به‌روزرسانی</button></div>
+      <div className="section-heading" id="organizations"><div><h2>مدیریت سازمان‌ها و برندها</h2><p>ثبت و مشاهده اطلاعات پایه از طریق API و PostgreSQL</p></div><div className="topbar-work-actions"><button className="refresh-button" onClick={() => void createDemoWorkspace()} disabled={seedingDemo || saving}>{seedingDemo ? "در حال ساخت داده‌ها…" : "ساخت فضای نمونه دیجی‌بایل"}</button><button className="refresh-button" onClick={() => void loadOrganizations()} disabled={loading}>به‌روزرسانی</button></div></div>
       {error && <div className="feedback error" role="alert">{error}</div>}
       {notice && <div className="feedback success" role="status">{notice}</div>}
       <div className="management-grid">
