@@ -33,6 +33,12 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AutomationRun>(e =>
+        {
+            e.Property(x => x.EventKey).HasMaxLength(128);
+            e.HasIndex(x => new { x.OrganizationId, x.RuleId, x.EventKey }).IsUnique().HasFilter("\"EventKey\" IS NOT NULL");
+        });
+
         modelBuilder.Entity<SalesOrder>(e =>
         {
             e.ToTable("sales_orders"); e.HasKey(x => x.Id);
