@@ -545,6 +545,7 @@ crmApi.MapPost("/contacts", async (Guid organizationId, CrmContactRequest reques
     var item = new CrmContact { OrganizationId = organizationId, BrandId = request.BrandId, FullName = name,
         Email = Clean(request.Email), Phone = Clean(request.Phone), Company = Clean(request.Company), Notes = Clean(request.Notes) };
     db.CrmContacts.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.contact_created", "CrmContact", item.Id, "مخاطب جدید ایجاد شد.");
     await QueueAutomationRunsAsync(db, organizationId, "ContactCreated", "Contact", item.Id, new { contactName = item.FullName, company = item.Company }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/contacts/{item.Id}",
@@ -566,6 +567,7 @@ crmApi.MapPut("/contacts/{contactId:guid}", async (Guid organizationId, Guid con
         return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
     item.FullName = name; item.BrandId = request.BrandId; item.Email = Clean(request.Email);
     item.Phone = Clean(request.Phone); item.Company = Clean(request.Company); item.Notes = Clean(request.Notes);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.contact_updated", "CrmContact", item.Id, "اطلاعات مخاطب ویرایش شد.");
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.BrandId, item.FullName, item.Email, item.Phone, item.Company, item.Notes, item.CreatedAt });
 });
@@ -577,6 +579,7 @@ crmApi.MapDelete("/contacts/{contactId:guid}", async (Guid organizationId, Guid 
     var item = await db.CrmContacts.SingleOrDefaultAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     db.CrmContacts.Remove(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.contact_deleted", "CrmContact", contactId, "مخاطب حذف شد.");
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -609,6 +612,7 @@ crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, Cla
     var item = new CrmLead { OrganizationId = organizationId, BrandId = request.BrandId, ContactId = request.ContactId,
         Title = title, Stage = stage, EstimatedValue = request.EstimatedValue, Source = Clean(request.Source), Notes = Clean(request.Notes) };
     db.CrmLeads.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_created", "CrmLead", item.Id, "فرصت فروش ایجاد شد.", new { item.Stage });
     await QueueAutomationRunsAsync(db, organizationId, "LeadCreated", "Lead", item.Id, new { leadTitle = item.Title, leadStage = item.Stage, leadSource = item.Source }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/leads/{item.Id}", new { item.Id, item.Title, item.Stage, item.EstimatedValue, item.ContactId, item.BrandId, item.Source, item.Notes, item.CreatedAt, item.UpdatedAt });
@@ -633,6 +637,7 @@ crmApi.MapPut("/leads/{leadId:guid}", async (Guid organizationId, Guid leadId, C
     item.Title = title; item.Stage = stage; item.BrandId = request.BrandId; item.ContactId = request.ContactId;
     item.EstimatedValue = request.EstimatedValue; item.Source = Clean(request.Source); item.Notes = Clean(request.Notes);
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_updated", "CrmLead", item.Id, "اطلاعات فرصت فروش ویرایش شد.", new { previousStage, newStage = item.Stage });
     if (!string.Equals(previousStage, item.Stage, StringComparison.OrdinalIgnoreCase))
         await QueueAutomationRunsAsync(db, organizationId, "LeadStageChanged", "Lead", item.Id, new { previousStage, newStage = item.Stage }, ct);
     await db.SaveChangesAsync(ct);
@@ -646,6 +651,7 @@ crmApi.MapDelete("/leads/{leadId:guid}", async (Guid organizationId, Guid leadId
     var item = await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     db.CrmLeads.Remove(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_deleted", "CrmLead", leadId, "فرصت فروش حذف شد.");
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -660,6 +666,7 @@ crmApi.MapPatch("/leads/{leadId:guid}/stage", async (Guid organizationId, Guid l
     var previousStage = item.Stage;
     item.Stage = request.Stage;
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.lead_stage_changed", "CrmLead", item.Id, "مرحله فرصت فروش تغییر کرد.", new { previousStage, newStage = item.Stage });
     if (!string.Equals(previousStage, item.Stage, StringComparison.OrdinalIgnoreCase))
         await QueueAutomationRunsAsync(db, organizationId, "LeadStageChanged", "Lead", item.Id, new { previousStage, newStage = item.Stage }, ct);
     await db.SaveChangesAsync(ct);
@@ -691,6 +698,7 @@ crmApi.MapPost("/activities", async (Guid organizationId, CrmActivityRequest req
     var item = new CrmActivity { OrganizationId = organizationId, ContactId = request.ContactId, LeadId = request.LeadId,
         CreatedByUserId = userId.Value, ActivityType = type, Summary = summary, OccurredAt = request.OccurredAt ?? DateTimeOffset.UtcNow };
     db.CrmActivities.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "crm.activity_created", "CrmActivity", item.Id, "فعالیت CRM ثبت شد.", new { item.ActivityType });
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/activities/{item.Id}", new { item.Id, item.ContactId, item.LeadId, item.ActivityType, item.Summary, item.OccurredAt, item.CreatedByUserId });
 });
@@ -727,7 +735,7 @@ campaignsApi.MapPost("/", async (Guid organizationId, CampaignRequest request, C
     var item = new MarketingCampaign { OrganizationId = organizationId, BrandId = request.BrandId, Name = name,
         Objective = Clean(request.Objective), Channel = channel, Status = status, Budget = request.Budget,
         StartsAt = request.StartsAt, EndsAt = request.EndsAt, Notes = Clean(request.Notes), ActualSpend = request.ActualSpend, AttributedRevenue = request.AttributedRevenue, Impressions = request.Impressions, Clicks = request.Clicks, Conversions = request.Conversions };
-    db.MarketingCampaigns.Add(item); await db.SaveChangesAsync(ct);
+    db.MarketingCampaigns.Add(item); RecordAuditEvent(db, organizationId, userId.Value, "campaign.created", "MarketingCampaign", item.Id, "کمپین ایجاد شد.", new { item.Channel, item.Status }); await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/campaigns/{item.Id}", item);
 });
 
@@ -749,6 +757,7 @@ campaignsApi.MapPut("/{campaignId:guid}", async (Guid organizationId, Guid campa
     item.Name = name; item.Objective = Clean(request.Objective); item.Channel = channel; item.Status = status;
     item.BrandId = request.BrandId; item.Budget = request.Budget; item.StartsAt = request.StartsAt;
     item.EndsAt = request.EndsAt; item.Notes = Clean(request.Notes); item.ActualSpend = request.ActualSpend; item.AttributedRevenue = request.AttributedRevenue; item.Impressions = request.Impressions; item.Clicks = request.Clicks; item.Conversions = request.Conversions; item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "campaign.updated", "MarketingCampaign", item.Id, "اطلاعات کمپین ویرایش شد.", new { item.Channel, item.Status });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.BrandId, item.Name, item.Objective, item.Channel, item.Status, item.Budget, item.ActualSpend, item.AttributedRevenue, item.Impressions, item.Clicks, item.Conversions, item.StartsAt, item.EndsAt, item.Notes, item.UpdatedAt });
 });
@@ -808,7 +817,7 @@ campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid ca
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var item = await db.MarketingCampaigns.SingleOrDefaultAsync(x => x.Id == campaignId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
-    db.MarketingCampaigns.Remove(item); await db.SaveChangesAsync(ct); return Results.NoContent();
+    db.MarketingCampaigns.Remove(item); RecordAuditEvent(db, organizationId, userId.Value, "campaign.deleted", "MarketingCampaign", campaignId, "کمپین حذف شد."); await db.SaveChangesAsync(ct); return Results.NoContent();
 });
 
 
@@ -977,6 +986,7 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         Status = credential is null ? "PendingAuthorization" : "CredentialsStored"
     };
     db.SocialChannelConnections.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "channel.connected", "SocialChannelConnection", item.Id, "اتصال کانال اجتماعی ثبت شد.", new { item.Provider, item.Status });
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/channels/{item.Id}",
         new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
@@ -1165,6 +1175,7 @@ channelsApi.MapDelete("/{connectionId:guid}", async (Guid organizationId, Guid c
     var item = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == connectionId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
     db.SocialChannelConnections.Remove(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "channel.removed", "SocialChannelConnection", connectionId, "اتصال کانال اجتماعی حذف شد.", new { item.Provider });
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
@@ -2370,6 +2381,7 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
         Status = initialStatus, LastMessageAt = DateTimeOffset.UtcNow
     };
     db.InboxConversations.Add(item);
+    RecordAuditEvent(db, organizationId, userId.Value, "inbox.conversation_created", "InboxConversation", item.Id, "مکالمه جدید ایجاد شد.");
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/inbox/conversations/{item.Id}",
         new { item.Id, item.Subject, item.Status, item.ChannelConnectionId, item.ContactId, item.CreatedAt });
@@ -2482,6 +2494,7 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
         item.AssignedToUserId = assignee == Guid.Empty ? null : assignee;
     }
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    RecordAuditEvent(db, organizationId, userId.Value, "inbox.conversation_updated", "InboxConversation", item.Id, "وضعیت یا مسئول مکالمه تغییر کرد.", new { item.Status, item.AssignedToUserId });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.Status, item.AssignedToUserId, item.UpdatedAt });
 });
