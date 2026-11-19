@@ -747,7 +747,7 @@ ordersApi.MapGet("/{orderId:guid}", async (Guid organizationId, Guid orderId, Cl
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var order = await db.SalesOrders.AsNoTracking().Where(x => x.Id == orderId && x.OrganizationId == organizationId)
-        .Select(x => new { x.Id, x.OrderNumber, x.ContactId, ContactName = x.Contact == null ? null : x.Contact.FullName,
+        .Select(x => new { x.Id, x.OrderNumber, x.ContactId, ContactName = db.CrmContacts.Where(c => c.Id == x.ContactId && c.OrganizationId == organizationId).Select(c => c.FullName).FirstOrDefault(),
             x.Status, x.Currency, x.Subtotal, x.Discount, x.Tax, x.Total, x.Notes, x.Version, x.CreatedByUserId, x.CreatedAt, x.UpdatedAt })
         .SingleOrDefaultAsync(ct);
     if (order is null) return Results.NotFound();
