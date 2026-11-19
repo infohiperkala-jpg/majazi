@@ -23,7 +23,7 @@ export default function ContentStudioPage(){
  const [token,setToken]=useState("");const [orgs,setOrgs]=useState<Organization[]>([]);const [org,setOrg]=useState("");
  const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [calendarItems,setCalendarItems]=useState<CalendarItem[]>([]);const [selected,setSelected]=useState("");
  const [detail,setDetail]=useState<Draft|null>(null);const [approvals,setApprovals]=useState<Approval[]>([]);const [approvalComment,setApprovalComment]=useState("");const [ai,setAi]=useState<AIStatus|null>(null);const [targets,setTargets]=useState<PublishTarget[]>([]);const [connectionId,setConnectionId]=useState("");const [targetChatId,setTargetChatId]=useState("");const [scheduledAt,setScheduledAt]=useState("");
- const [topic,setTopic]=useState("");const [brandId,setBrandId]=useState("");const [channel,setChannel]=useState("Instagram");const [tone,setTone]=useState("حرفه‌ای و متقاعدکننده");const [instructions,setInstructions]=useState("");
+ const [topic,setTopic]=useState("");const [manualTitle,setManualTitle]=useState("");const [manualContent,setManualContent]=useState("");const [createMode,setCreateMode]=useState<"ai"|"manual">("ai");const [brandId,setBrandId]=useState("");const [channel,setChannel]=useState("Instagram");const [tone,setTone]=useState("حرفه‌ای و متقاعدکننده");const [instructions,setInstructions]=useState("");
  const [title,setTitle]=useState("");const [content,setContent]=useState("");const [filter,setFilter]=useState("All");const [query,setQuery]=useState("");
  const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");
  const base="/api/organizations/"+org+"/content";
@@ -58,6 +58,12 @@ export default function ContentStudioPage(){
   e.preventDefault();await run(async()=>{
    const created=await api<Draft>(base+"/generate",token,{method:"POST",body:JSON.stringify({brandId:brandId||null,topic,channel,tone,instructions})});
    setTopic("");await refresh();await openDraft(created.id);setNotice("محتوا با مدل هوش مصنوعی تولید و به‌عنوان نسخه اول ذخیره شد.");
+  });
+ }
+ async function createManual(e:FormEvent<HTMLFormElement>){
+  e.preventDefault();await run(async()=>{
+   const created=await api<Draft>(base+"/drafts",token,{method:"POST",body:JSON.stringify({brandId:brandId||null,title:manualTitle,content:manualContent,channel,tone})});
+   setManualTitle("");setManualContent("");await refresh();await openDraft(created.id);setNotice("پیش‌نویس دستی ذخیره شد؛ اکنون می‌توانید آن را ویرایش و برای تأیید ارسال کنید.");
   });
  }
  async function save(){
@@ -111,15 +117,23 @@ export default function ContentStudioPage(){
   </section>
   <section className="studio-grid">
    <aside className="studio-generator">
-    <div className="studio-section-title"><span>01 / CREATE</span><h2>تولید محتوای جدید</h2><p>موضوع و هدف را مشخص کنید؛ خروجی مستقیماً در بانک محتوا ذخیره می‌شود.</p></div>
-    <form onSubmit={generate} className="studio-form">
+    <div className="studio-section-title"><span>01 / CREATE</span><h2>ایجاد محتوا</h2><p>برای هر پیام‌رسان، محتوای اختصاصی بسازید؛ با هوش مصنوعی یا به‌صورت دستی.</p></div>
+    <div className="studio-create-modes"><button type="button" className={createMode==="ai"?"active":""} onClick={()=>setCreateMode("ai")}>✦ ایجاد با هوش مصنوعی</button><button type="button" className={createMode==="manual"?"active":""} onClick={()=>setCreateMode("manual")}>✎ ایجاد دستی</button></div>
+    <div className="studio-platform-picker" aria-label="انتخاب پیام‌رسان و شبکه اجتماعی">{[{id:"Instagram",name:"اینستاگرام",icon:"◎"},{id:"Telegram",name:"تلگرام",icon:"➤"},{id:"WhatsApp",name:"واتساپ",icon:"◉"},{id:"Facebook",name:"فیسبوک",icon:"f"},{id:"YouTube",name:"یوتیوب",icon:"▶"},{id:"TikTok",name:"تیک‌تاک",icon:"♪"},{id:"LinkedIn",name:"لینکدین",icon:"in"},{id:"X",name:"ایکس",icon:"𝕏"},{id:"Bale",name:"بله",icon:"ب"},{id:"Rubika",name:"روبیکا",icon:"ر"},{id:"Eitaa",name:"ایتا",icon:"ا"},{id:"Aparat",name:"آپارات",icon:"آپ"},{id:"SoroushPlus",name:"سروش‌پلاس",icon:"س"},{id:"Gap",name:"گپ",icon:"گ"},{id:"iGap",name:"آی‌گپ",icon:"آ"},{id:"Shad",name:"شاد",icon:"ش"},{id:"Discord",name:"دیسکورد",icon:"◈"},{id:"Pinterest",name:"پینترست",icon:"P"},{id:"Threads",name:"تردز",icon:"@"},{id:"Snapchat",name:"اسنپ‌چت",icon:"👻"},{id:"Viber",name:"وایبر",icon:"V"},{id:"LINE",name:"لاین",icon:"L"},{id:"WeChat",name:"وی‌چت",icon:"W"},{id:"Reddit",name:"ردیت",icon:"●"},{id:"Mastodon",name:"ماستودون",icon:"m"},{id:"Bluesky",name:"بلواسکای",icon:"🦋"},{id:"Twitch",name:"توییچ",icon:"▣"},{id:"Messenger",name:"مسنجر",icon:"ϟ"}].map(x=><button type="button" key={x.id} className={channel===x.id?"selected":""} onClick={()=>setChannel(x.id)}><i>{x.icon}</i><span>{x.name}</span></button>)}</div>
+    {createMode==="ai"?<form onSubmit={generate} className="studio-form">
      <label>موضوع یا ایده محتوا<textarea value={topic} onChange={e=>setTopic(e.target.value)} required maxLength={1500} rows={4} placeholder="مثلاً معرفی مزیت رقابتی محصول و دعوت مخاطب به اقدام..."/></label>
      <label>برند<select value={brandId} onChange={e=>setBrandId(e.target.value)}><option value="">بدون انتخاب برند</option>{brands.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
      <div className="studio-form-row"><label>کانال انتشار<select value={channel} onChange={e=>setChannel(e.target.value)}>{["Instagram","Telegram","WhatsApp","Website","LinkedIn","Email","General"].map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>لحن<select value={tone} onChange={e=>setTone(e.target.value)}>{["حرفه‌ای و متقاعدکننده","رسمی","دوستانه","لوکس و پریمیوم","آموزشی","خلاقانه","فروش‌محور"].map(x=><option key={x}>{x}</option>)}</select></label></div>
      <label>دستور تکمیلی<textarea value={instructions} onChange={e=>setInstructions(e.target.value)} maxLength={4000} rows={3} placeholder="مخاطب هدف، کلمات کلیدی، محدودیت‌ها و فراخوان اقدام..."/></label>
      <button className="studio-primary" disabled={busy||!ai?.configured||!org||!topic.trim()}>{busy?"در حال تولید و ذخیره…":"✦ تولید محتوا با هوش مصنوعی"}</button>
      <small>تولید فقط با سرویس واقعی انجام می‌شود؛ در صورت نبود اتصال، متن ساختگی ساخته نخواهد شد.</small>
-    </form>
+    </form>:<form onSubmit={createManual} className="studio-form">
+     <label>عنوان محتوا<input required maxLength={240} value={manualTitle} onChange={e=>setManualTitle(e.target.value)} placeholder="عنوان مخصوص این پیام‌رسان"/></label>
+     <label>متن محتوا<textarea required maxLength={30000} rows={9} value={manualContent} onChange={e=>setManualContent(e.target.value)} placeholder="متن، هشتگ‌ها، لینک و فراخوان اقدام..."/></label>
+     <label>برند<select value={brandId} onChange={e=>setBrandId(e.target.value)}><option value="">بدون انتخاب برند</option>{brands.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+     <button className="studio-primary" disabled={busy||!org||!manualTitle.trim()||!manualContent.trim()}>ذخیره پیش‌نویس دستی</button>
+     <small>پیش‌نویس دستی هم وارد گردش نسخه‌بندی و تأیید محتوا می‌شود.</small>
+    </form>}
    </aside>
    <section className="studio-library">
     <div className="studio-section-title"><span>02 / LIBRARY</span><h2>کتابخانه محتوا</h2><p>پیش‌نویس‌ها و محتوای تأییدشده سازمان</p></div>
@@ -130,7 +144,7 @@ export default function ContentStudioPage(){
   {detail&&<section className="studio-editor">
    <div className="studio-editor-heading"><div><span>03 / EDITOR · {detail.aiModel||"MANUAL"}</span><h2>ویرایش و بازبینی محتوا</h2><p>هر ذخیره‌سازی یک نسخه مستقل در تاریخچه ایجاد می‌کند.</p></div><span className={"draft-status "+(detail.status==="Approved"||detail.status==="Published"?"approved":"")}>{statuses[detail.status]??detail.status}</span></div>
    <div className="studio-editor-grid"><div className="studio-edit-fields"><label>عنوان محتوا<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={240}/></label><label>متن محتوا<textarea value={content} onChange={e=>setContent(e.target.value)} rows={15} maxLength={30000}/></label><div className="studio-editor-actions"><button className="studio-primary" disabled={busy||!title.trim()||!content.trim()} onClick={()=>void save()}>ذخیره و ایجاد نسخه</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void approve()}>{detail.status==="InReview"?"ثبت تأیید مرحله دوم":"ثبت تأیید مرحله اول"}</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!approvalComment.trim()||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void reject()}>رد و بازگشت برای اصلاح</button></div><label>یادداشت بازبینی (برای رد الزامی)<textarea value={approvalComment} onChange={e=>setApprovalComment(e.target.value)} rows={2} maxLength={1000} placeholder="نکات اصلاح یا توضیح تأیید..."/></label><div className="studio-history"><h3>گردش تأیید دو مرحله‌ای</h3>{approvals.length===0?<small>هنوز تصمیمی ثبت نشده است.</small>:approvals.map(a=><div key={a.id}><b>دور {a.reviewRound} · مرحله {a.stageNumber} · {a.decision==="Approved"?"تأیید":"رد"}</b><span>{a.comment||"بدون یادداشت"}</span><small>{new Date(a.createdAt).toLocaleString("fa-IR")}</small></div>)}</div><small>تأیید نهایی نیازمند دو مدیر متفاوت (مالک یا مدیر سازمان) است. ویرایش محتوا در جریان بازبینی، دور جدیدی ایجاد می‌کند.</small>
-    {detail.channel==="Telegram"&&<section className="studio-publish"><h3>انتشار تلگرام</h3><p>انتشار فقط پس از تأیید نهایی و انتخاب مقصد مشخص انجام می‌شود.</p>
+    {<section className="studio-publish"><h3>ارسال به {detail.channel==="Instagram"?"اینستاگرام":detail.channel==="Telegram"?"تلگرام":detail.channel==="Bale"?"بله":detail.channel==="Rubika"?"روبیکا":detail.channel==="Eitaa"?"ایتا":detail.channel==="WhatsApp"?"واتساپ":detail.channel}</h3><p>انتشار فقط پس از تأیید نهایی و انتخاب مقصد مشخص انجام می‌شود.</p>
      <label>ربات متصل<select value={connectionId} onChange={e=>setConnectionId(e.target.value)}><option value="">انتخاب اتصال</option>{targets.map(t=><option key={t.id} value={t.id}>{t.displayName}</option>)}</select></label>
      <label>شناسه عددی چت / کانال مقصد<input value={targetChatId} onChange={e=>setTargetChatId(e.target.value)} placeholder="مثلاً -1001234567890 یا @channelname"/></label>
      <div className="studio-schedule-row"><label>زمان انتشار<input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label><button className="studio-approve" disabled={busy||detail.status!=="Approved"||!targets.length||!targetChatId.trim()||!scheduledAt} onClick={()=>void schedule()}>زمان‌بندی انتشار</button></div>
@@ -138,6 +152,7 @@ export default function ContentStudioPage(){
      {detail.status==="Scheduled"&&<small>زمان انتشار: {detail.scheduledAt?new Date(detail.scheduledAt).toLocaleString("fa-IR"):"در صف"}</small>}
      {detail.status==="PublishFailed"&&<small className="publish-error">ارسال ناموفق بود: {detail.publishError||"اتصال ربات، مجوز ارسال و شناسه مقصد را بررسی کنید."} سپس محتوا را دوباره تأیید و زمان‌بندی کنید.</small>}
      {detail.status==="Published"&&<small>منتشرشده در {detail.publishedAt?new Date(detail.publishedAt).toLocaleString("fa-IR"):""}</small>}
+    {detail.channel!=="Telegram"&&<small>آداپتور ارسال رسمی این پلتفرم هنوز در MAJAZI فعال نشده است. این محتوا ذخیره و تأیید می‌شود، اما دکمه ارسال تا اتصال API رسمی غیرفعال است.</small>}
     </section>}</div>
     <aside className="studio-history"><h3>تاریخچه نسخه‌ها</h3>{(detail.versions??[]).map(v=><button key={v.id} onClick={()=>{setTitle(v.title);setContent(v.content);}}><b>نسخه {v.versionNumber}</b><span>{v.changeNote}</span><small>{new Date(v.createdAt).toLocaleString("fa-IR")}</small></button>)}</aside>
    </div>
