@@ -4043,7 +4043,7 @@ public sealed record EditContentDraftRequest(string? Title, string? Content, str
 public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt,
     string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null, string? WhatsAppTemplateComponentsJson = null);
 public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId,
-    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null);
+    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null, string? WhatsAppTemplateComponentsJson = null);
 
 
 public sealed record ContentApprovalRequest(string? Comment);
