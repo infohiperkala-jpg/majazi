@@ -760,7 +760,7 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
 });
 
 
-var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram"]);
+var channelProviders = new HashSet<string>(["Instagram", "Telegram"]);
 channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
