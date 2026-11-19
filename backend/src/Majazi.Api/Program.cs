@@ -1194,6 +1194,8 @@ contentApi.MapPut("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
     var draft = await db.ContentDrafts.Include(x => x.Versions)
         .SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
+    if (draft.Status is "Scheduled" or "Publishing" or "Published")
+        return Results.Conflict(new { error = "برای ویرایش، ابتدا زمان‌بندی را لغو کنید؛ محتوای منتشرشده یا در حال انتشار قابل تغییر نیست." });
     var title = request.Title?.Trim(); var content = request.Content?.Trim();
     if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(content) || content.Length > 30000)
         return Results.BadRequest(new { error = "عنوان و متن محتوا الزامی است و طول آن باید معتبر باشد." });
@@ -1220,6 +1222,8 @@ contentApi.MapPost("/drafts/{draftId:guid}/approve", async (Guid organizationId,
     if (role is not ("Owner" or "Admin")) return Results.Forbid();
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
+    if (draft.Status is "Scheduled" or "Publishing" or "Published")
+        return Results.Conflict(new { error = "محتوای زمان‌بندی‌شده یا منتشرشده قابل تأیید مجدد نیست." });
     if (string.IsNullOrWhiteSpace(draft.Content)) return Results.Conflict(new { error = "محتوای خالی قابل تأیید نیست." });
     draft.Status = "Approved"; draft.ApprovedAt = DateTimeOffset.UtcNow; draft.ApprovedByUserId = userId.Value; draft.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
