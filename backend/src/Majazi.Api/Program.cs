@@ -1532,7 +1532,7 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
             endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,display_phone_number,verified_name";
         }
         else return Results.Conflict(new { error = "برای این پلتفرم هنوز آداپتور رسمی بررسی سلامت پیاده‌سازی نشده است." });
-        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        using var request = new HttpRequestMessage(item.Provider == "Rubika" ? HttpMethod.Post : HttpMethod.Get, endpoint);
         if (item.Provider is "WhatsApp" or "Facebook") request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
         using var response = await clients.CreateClient(item.Provider is "Telegram" or "Bale" or "Rubika" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
         using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
