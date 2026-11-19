@@ -18,6 +18,7 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
     public DbSet<ContentDraft> ContentDrafts => Set<ContentDraft>();
     public DbSet<ContentDraftVersion> ContentDraftVersions => Set<ContentDraftVersion>();
+    public DbSet<ContentApprovalRecord> ContentApprovalRecords => Set<ContentApprovalRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -158,6 +159,17 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.Property(x => x.Content).HasMaxLength(30000).IsRequired();
             e.Property(x => x.ChangeNote).HasMaxLength(300).IsRequired();
             e.HasIndex(x => new { x.DraftId, x.VersionNumber }).IsUnique();
+        });
+
+        modelBuilder.Entity<ContentApprovalRecord>(e =>
+        {
+            e.ToTable("content_approval_records"); e.HasKey(x => x.Id);
+            e.Property(x => x.Decision).HasMaxLength(20).IsRequired();
+            e.Property(x => x.Comment).HasMaxLength(1000);
+            e.HasIndex(x => new { x.DraftId, x.StageNumber }).IsUnique();
+            e.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
+            e.HasOne<ContentDraft>().WithMany().HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<CrmActivity>(e =>
