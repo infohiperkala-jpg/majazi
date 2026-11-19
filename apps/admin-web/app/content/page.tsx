@@ -40,8 +40,12 @@ export default function ContentStudioPage(){
   if(selected&&!drafts.some(x=>x.id===selected)){setSelected("");setDetail(null);}
  }
  async function openDraft(id:string){
-  setSelected(id);const result=await api<Draft>(base+"/drafts/"+id,token);
-  setDetail(result);setTitle(result.title);setContent(result.content);
+  setSelected(id);
+  const [result,history]=await Promise.all([
+   api<Draft>(base+"/drafts/"+id,token),
+   api<Approval[]>(base+"/drafts/"+id+"/approvals",token)
+  ]);
+  setDetail(result);setApprovals(history);setApprovalComment("");setTitle(result.title);setContent(result.content);
  }
  useEffect(()=>{
   const saved=localStorage.getItem("majazi_access_token")??"";setToken(saved);
