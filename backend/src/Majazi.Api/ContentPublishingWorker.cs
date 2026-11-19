@@ -83,23 +83,41 @@ public sealed class ContentPublishingWorker(
                         throw new InvalidOperationException("شناسه Phone Number ID برای اتصال واتساپ ثبت نشده است.");
                     var attachment = await db.ContentDraftAttachments.AsNoTracking()
                         .SingleOrDefaultAsync(x => x.DraftId == draft.Id, ct);
-                    if (attachment is null)
+                    var outboundPayload = new Dictionary<string, object>
                     {
-                        using var outbound = new HttpRequestMessage(HttpMethod.Post,
-                            $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(phoneNumberId)}/messages");
-                        outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-                        outbound.Content = JsonContent.Create(new
+                        ["messaging_product"] = "whatsapp",
+                        ["recipient_type"] = "individual",
+                        ["to"] = draft.PublishTarget!.Trim().TrimStart('+')
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(draft.WhatsAppTemplateName))
+                    {
+                        if (attachment is not null)
+                            throw new InvalidOperationException("قالب متنی واتساپ را نمی‌توان هم‌زمان با پیوست رسانه‌ای ارسال کرد.");
+                        var parameters = JsonSerializer.Deserialize<string[]>(draft.WhatsAppTemplateParametersJson ?? "[]") ?? [];
+                        var template = new Dictionary<string, object>
                         {
-                            messaging_product = "whatsapp", recipient_type = "individual",
-                            to = draft.PublishTarget!.Trim().TrimStart('+'), type = "text",
-                            text = new { preview_url = false, body = draft.Content }
-                        });
-                        using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
-                        if (!response.IsSuccessStatusCode)
-                            throw new InvalidOperationException("WhatsApp Cloud API پیام را نپذیرفت؛ شماره مقصد، مجوزها و پنجره ۲۴ ساعته پیام‌رسانی را بررسی کنید.");
-                        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                        if (!json.RootElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() == 0)
-                            throw new InvalidOperationException("WhatsApp شناسه پیام ارسالی را برنگرداند.");
+                            ["name"] = draft.WhatsAppTemplateName,
+                            ["language"] = new { code = draft.WhatsAppTemplateLanguage ?? "en_US" }
+                        };
+                        if (parameters.Length > 0)
+                        {
+                            template["components"] = new[]
+                            {
+                                new
+                                {
+                                    type = "body",
+                                    parameters = parameters.Select(value => new { type = "text", text = value }).ToArray()
+                                }
+                            };
+                        }
+                        outboundPayload["type"] = "template";
+                        outboundPayload["template"] = template;
+                    }
+                    else if (attachment is null)
+                    {
+                        outboundPayload["type"] = "text";
+                        outboundPayload["text"] = new { preview_url = false, body = draft.Content };
                     }
                     else
                     {
@@ -130,25 +148,32 @@ public sealed class ContentPublishingWorker(
                             "video" => new { id = mediaId, caption = draft.Content },
                             _ => new { id = mediaId, caption = draft.Content, filename = attachment.FileName }
                         };
-                        var payload = new Dictionary<string, object>
-                        {
-                            ["messaging_product"] = "whatsapp",
-                            ["recipient_type"] = "individual",
-                            ["to"] = draft.PublishTarget!.Trim().TrimStart('+'),
-                            ["type"] = mediaType,
-                            [mediaType] = media
-                        };
-                        using var outbound = new HttpRequestMessage(HttpMethod.Post,
-                            $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(phoneNumberId)}/messages");
-                        outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-                        outbound.Content = JsonContent.Create(payload);
-                        using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
-                        if (!response.IsSuccessStatusCode)
-                            throw new InvalidOperationException("WhatsApp Cloud API ارسال رسانه را نپذیرفت؛ شماره مقصد و پنجره ۲۴ ساعته پیام‌رسانی را بررسی کنید.");
-                        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                        if (!json.RootElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() == 0)
-                            throw new InvalidOperationException("WhatsApp شناسه پیام رسانه‌ای را برنگرداند.");
+                        outboundPayload["type"] = mediaType;
+                        outboundPayload[mediaType] = media;
                     }
+
+                    using var outbound = new HttpRequestMessage(HttpMethod.Post,
+                        $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(phoneNumberId)}/messages");
+                    outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                    outbound.Content = JsonContent.Create(outboundPayload);
+                    using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var errorBody = await response.Content.ReadAsStringAsync(ct);
+                        var detail = "WhatsApp Cloud API پیام را نپذیرفت؛ قالب، زبان، پارامترها، مجوزها و وضعیت شماره مقصد را بررسی کنید.";
+                        try
+                        {
+                            using var errorJson = JsonDocument.Parse(errorBody);
+                            if (errorJson.RootElement.TryGetProperty("error", out var error) &&
+                                error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+                                detail += " جزئیات Meta: " + message.GetString();
+                        }
+                        catch (JsonException) { }
+                        throw new InvalidOperationException(detail);
+                    }
+                    using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (!json.RootElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() == 0)
+                        throw new InvalidOperationException("WhatsApp شناسه پیام ارسالی را برنگرداند.");
                 }
                 else if (connection.Provider == "Telegram")
                 {
