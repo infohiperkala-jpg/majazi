@@ -2139,7 +2139,7 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
         (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
         ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
         (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
-        (actionType == "UpdateLeadStage" && trigger is "ContactCreated" or "ContentApproved") ||
+        (actionType == "UpdateLeadStage" && (trigger == "ContactCreated" || trigger == "ContentApproved")) ||
         (trigger == "ContentApproved" && conditionField != "Any") ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
         return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
@@ -2186,7 +2186,7 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
         (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
         ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
         (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
-        (actionType == "UpdateLeadStage" && trigger is "ContactCreated" or "ContentApproved") ||
+        (actionType == "UpdateLeadStage" && (trigger == "ContactCreated" || trigger == "ContentApproved")) ||
         (trigger == "ContentApproved" && conditionField != "Any") ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
         return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
