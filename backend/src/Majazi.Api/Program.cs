@@ -1515,9 +1515,15 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
         .Select(x => new { x.OrderId, x.Amount, x.Status }).ToListAsync(ct);
     var paidByOrder = orderPayments.Where(x => x.Status == "Paid").GroupBy(x => x.OrderId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
     var refundedByOrder = orderPayments.Where(x => x.Status == "Refunded").GroupBy(x => x.OrderId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
-    var paidTotal = paidByOrder.Values.Sum();
-    var refundedTotal = refundedByOrder.Values.Sum();
-    var outstandingTotal = orderRows.Sum(x => Math.Max(0, x.Total - (paidByOrder.GetValueOrDefault(x.Id)) + refundedByOrder.GetValueOrDefault(x.Id)));
+    var orderFinancialsByCurrency = orderRows.GroupBy(x => x.Currency).Select(g => new
+    {
+        currency = g.Key,
+        orders = g.Count(),
+        orderValue = g.Sum(x => x.Total),
+        paidAmount = g.Sum(x => paidByOrder.GetValueOrDefault(x.Id)),
+        refundedAmount = g.Sum(x => refundedByOrder.GetValueOrDefault(x.Id)),
+        outstandingBalance = g.Sum(x => Math.Max(0, x.Total - paidByOrder.GetValueOrDefault(x.Id) + refundedByOrder.GetValueOrDefault(x.Id)))
+    }).OrderBy(x => x.currency).ToList();
     var daily = Enumerable.Range(0, (int)Math.Min(367, Math.Floor((end.Date - start.Date).TotalDays) + 1))
         .Select(offset => start.Date.AddDays(offset))
         .Select(day => new
@@ -1552,10 +1558,7 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
             processingOrders = orderRows.Count(x => x.Status == "Processing"),
             completedOrders = orderRows.Count(x => x.Status == "Completed"),
             cancelledOrders = orderRows.Count(x => x.Status == "Cancelled"),
-            orderValue = orderRows.Sum(x => x.Total),
-            paidAmount = paidTotal,
-            refundedAmount = refundedTotal,
-            outstandingBalance = outstandingTotal
+            orderFinancialsByCurrency
         },
         leadStages = leads.GroupBy(x => x.Stage).Select(g => new { key = g.Key, count = g.Count(), value = g.Sum(x => x.EstimatedValue ?? 0m) }).OrderByDescending(x => x.count),
         campaignStatuses = campaigns.GroupBy(x => x.Status).Select(g => new { key = g.Key, count = g.Count() }).OrderByDescending(x => x.count),
