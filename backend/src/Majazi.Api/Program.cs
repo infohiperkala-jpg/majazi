@@ -43,6 +43,7 @@ builder.Services.AddHttpClient("AIProvider", client => client.Timeout = TimeSpan
         builder.Configuration["Network:AIProxy"] ?? builder.Configuration["Network:InternationalDefaultProxy"]));
 builder.Services.AddHostedService<ContentPublishingWorker>();
 builder.Services.AddHostedService<GrowthAgentWorker>();
+builder.Services.AddHostedService<AutomationWorker>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -504,6 +505,7 @@ crmApi.MapPost("/contacts", async (Guid organizationId, CrmContactRequest reques
     var item = new CrmContact { OrganizationId = organizationId, BrandId = request.BrandId, FullName = name,
         Email = Clean(request.Email), Phone = Clean(request.Phone), Company = Clean(request.Company), Notes = Clean(request.Notes) };
     db.CrmContacts.Add(item);
+    await QueueAutomationRunsAsync(db, organizationId, "ContactCreated", "Contact", item.Id, new { contactName = item.FullName, company = item.Company }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/contacts/{item.Id}",
         new { item.Id, item.BrandId, item.FullName, item.Email, item.Phone, item.Company, item.Notes, item.CreatedAt });
@@ -567,6 +569,7 @@ crmApi.MapPost("/leads", async (Guid organizationId, CrmLeadRequest request, Cla
     var item = new CrmLead { OrganizationId = organizationId, BrandId = request.BrandId, ContactId = request.ContactId,
         Title = title, Stage = stage, EstimatedValue = request.EstimatedValue, Source = Clean(request.Source), Notes = Clean(request.Notes) };
     db.CrmLeads.Add(item);
+    await QueueAutomationRunsAsync(db, organizationId, "LeadCreated", "Lead", item.Id, new { leadTitle = item.Title, leadStage = item.Stage, leadSource = item.Source }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Created($"/api/organizations/{organizationId}/crm/leads/{item.Id}", new { item.Id, item.Title, item.Stage, item.EstimatedValue, item.ContactId, item.BrandId, item.Source, item.Notes, item.CreatedAt, item.UpdatedAt });
 });
@@ -586,9 +589,12 @@ crmApi.MapPut("/leads/{leadId:guid}", async (Guid organizationId, Guid leadId, C
         return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
     if (request.ContactId is Guid contactId && !await db.CrmContacts.AnyAsync(x => x.Id == contactId && x.OrganizationId == organizationId, ct))
         return Results.BadRequest(new { error = "مخاطب انتخاب‌شده متعلق به این سازمان نیست." });
+    var previousStage = item.Stage;
     item.Title = title; item.Stage = stage; item.BrandId = request.BrandId; item.ContactId = request.ContactId;
     item.EstimatedValue = request.EstimatedValue; item.Source = Clean(request.Source); item.Notes = Clean(request.Notes);
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    if (!string.Equals(previousStage, item.Stage, StringComparison.OrdinalIgnoreCase))
+        await QueueAutomationRunsAsync(db, organizationId, "LeadStageChanged", "Lead", item.Id, new { previousStage, newStage = item.Stage }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.Title, item.Stage, item.EstimatedValue, item.ContactId, item.BrandId, item.Source, item.Notes, item.UpdatedAt });
 });
@@ -611,8 +617,11 @@ crmApi.MapPatch("/leads/{leadId:guid}/stage", async (Guid organizationId, Guid l
     if (request.Stage is null || !await IsAllowedConfiguredStatus(db, organizationId, "crm.lead", request.Stage, leadStages, ct)) return Results.BadRequest(new { error = "مرحله فروش معتبر نیست." });
     var item = await db.CrmLeads.SingleOrDefaultAsync(x => x.Id == leadId && x.OrganizationId == organizationId, ct);
     if (item is null) return Results.NotFound();
+    var previousStage = item.Stage;
     item.Stage = request.Stage;
     item.UpdatedAt = DateTimeOffset.UtcNow;
+    if (!string.Equals(previousStage, item.Stage, StringComparison.OrdinalIgnoreCase))
+        await QueueAutomationRunsAsync(db, organizationId, "LeadStageChanged", "Lead", item.Id, new { previousStage, newStage = item.Stage }, ct);
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { item.Id, item.Stage, item.UpdatedAt });
 });
@@ -1451,6 +1460,127 @@ templatesApi.MapDelete("/{templateId:guid}", async (Guid organizationId, Guid te
     return Results.NoContent();
 });
 
+var automationApi = app.MapGroup("/api/organizations/{organizationId:guid}/automations").RequireAuthorization();
+
+automationApi.MapGet("/rules", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var rules = await db.AutomationRules.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+        .OrderByDescending(x => x.CreatedAt)
+        .Select(x => new { x.Id, x.Name, x.Trigger, x.ConditionField, x.ConditionOperator, x.ConditionValue,
+            x.ActionType, x.ActivityType, x.ActionValue, x.IsEnabled, x.CreatedAt, x.UpdatedAt,
+            totalRuns = db.AutomationRuns.Count(r => r.RuleId == x.Id),
+            successfulRuns = db.AutomationRuns.Count(r => r.RuleId == x.Id && r.Status == "Succeeded") })
+        .ToListAsync(ct);
+    return Results.Ok(rules);
+});
+
+automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var name = request.Name?.Trim(); var trigger = request.Trigger?.Trim();
+    var conditionField = request.ConditionField?.Trim() ?? "Any";
+    var conditionOperator = request.ConditionOperator?.Trim() ?? "Equals";
+    var actionType = request.ActionType?.Trim(); var actionValue = request.ActionValue?.Trim();
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 120 ||
+        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged") ||
+        conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany") ||
+        conditionOperator is not ("Equals" or "Contains") ||
+        actionType is not ("CreateActivity" or "UpdateLeadStage") ||
+        string.IsNullOrWhiteSpace(actionValue) || actionValue.Length > 1000 ||
+        (request.ConditionValue?.Length ?? 0) > 240 ||
+        (actionType == "UpdateLeadStage" && trigger == "ContactCreated") ||
+        (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
+        return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
+    if (actionType == "UpdateLeadStage" &&
+        !await IsAllowedConfiguredStatus(db, organizationId, "crm.lead", actionValue, leadStages, ct))
+        return Results.BadRequest(new { error = "مرحله مقصد باید یک وضعیت فعال فروش باشد." });
+    var rule = new AutomationRule
+    {
+        OrganizationId = organizationId, CreatedByUserId = userId.Value, Name = name, Trigger = trigger,
+        ConditionField = conditionField, ConditionOperator = conditionOperator,
+        ConditionValue = conditionField == "Any" ? null : Clean(request.ConditionValue),
+        ActionType = actionType, ActivityType = actionType == "CreateActivity" ? request.ActivityType : null,
+        ActionValue = actionValue, IsEnabled = request.IsEnabled
+    };
+    db.AutomationRules.Add(rule);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/automations/rules/{rule.Id}",
+        new { rule.Id, rule.Name, rule.Trigger, rule.ConditionField, rule.ConditionOperator, rule.ConditionValue,
+            rule.ActionType, rule.ActivityType, rule.ActionValue, rule.IsEnabled, rule.CreatedAt, totalRuns = 0, successfulRuns = 0 });
+});
+
+automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ruleId, AutomationRuleRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var rule = await db.AutomationRules.SingleOrDefaultAsync(x => x.Id == ruleId && x.OrganizationId == organizationId, ct);
+    if (rule is null) return Results.NotFound();
+    var name = request.Name?.Trim(); var trigger = request.Trigger?.Trim();
+    var conditionField = request.ConditionField?.Trim() ?? "Any";
+    var conditionOperator = request.ConditionOperator?.Trim() ?? "Equals";
+    var actionType = request.ActionType?.Trim(); var actionValue = request.ActionValue?.Trim();
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 120 ||
+        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged") ||
+        conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany") ||
+        conditionOperator is not ("Equals" or "Contains") ||
+        actionType is not ("CreateActivity" or "UpdateLeadStage") ||
+        string.IsNullOrWhiteSpace(actionValue) || actionValue.Length > 1000 ||
+        (request.ConditionValue?.Length ?? 0) > 240 ||
+        (actionType == "UpdateLeadStage" && trigger == "ContactCreated") ||
+        (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
+        return Results.BadRequest(new { error = "محرک، شرط یا اقدام قانون معتبر نیست." });
+    if (actionType == "UpdateLeadStage" &&
+        !await IsAllowedConfiguredStatus(db, organizationId, "crm.lead", actionValue, leadStages, ct))
+        return Results.BadRequest(new { error = "مرحله مقصد باید یک وضعیت فعال فروش باشد." });
+    rule.Name = name; rule.Trigger = trigger; rule.ConditionField = conditionField;
+    rule.ConditionOperator = conditionOperator; rule.ConditionValue = conditionField == "Any" ? null : Clean(request.ConditionValue);
+    rule.ActionType = actionType; rule.ActivityType = actionType == "CreateActivity" ? request.ActivityType : null;
+    rule.ActionValue = actionValue; rule.IsEnabled = request.IsEnabled; rule.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { rule.Id, rule.Name, rule.Trigger, rule.ConditionField, rule.ConditionOperator, rule.ConditionValue,
+        rule.ActionType, rule.ActivityType, rule.ActionValue, rule.IsEnabled, rule.UpdatedAt });
+});
+
+automationApi.MapDelete("/rules/{ruleId:guid}", async (Guid organizationId, Guid ruleId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var rule = await db.AutomationRules.SingleOrDefaultAsync(x => x.Id == ruleId && x.OrganizationId == organizationId, ct);
+    if (rule is null) return Results.NotFound();
+    db.AutomationRules.Remove(rule);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
+automationApi.MapGet("/runs", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, int? take, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var limit = Math.Clamp(take ?? 50, 1, 200);
+    var runs = await db.AutomationRuns.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+        .OrderByDescending(x => x.CreatedAt).Take(limit)
+        .Join(db.AutomationRules.AsNoTracking(), run => run.RuleId, rule => rule.Id,
+            (run, rule) => new { run.Id, run.RuleId, ruleName = rule.Name, run.Trigger, run.SubjectType,
+                run.SubjectId, run.Status, run.Result, run.Error, run.CreatedAt, run.StartedAt, run.CompletedAt })
+        .ToListAsync(ct);
+    return Results.Ok(runs);
+});
+
 var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
 
 var growthAgentApi = app.MapGroup("/api/organizations/{organizationId:guid}/growth-agent").RequireAuthorization();
@@ -2098,6 +2228,21 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
 app.Run();
 
 
+
+static async Task QueueAutomationRunsAsync(MajaziDbContext db, Guid organizationId, string trigger, string subjectType, Guid subjectId, object payload, CancellationToken ct)
+{
+    var rules = await db.AutomationRules.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.Trigger == trigger && x.IsEnabled)
+        .Select(x => x.Id).ToListAsync(ct);
+    if (rules.Count == 0) return;
+    var payloadJson = JsonSerializer.Serialize(payload);
+    db.AutomationRuns.AddRange(rules.Select(ruleId => new AutomationRun
+    {
+        OrganizationId = organizationId, RuleId = ruleId, Trigger = trigger,
+        SubjectType = subjectType, SubjectId = subjectId, PayloadJson = payloadJson, Status = "Pending"
+    }));
+}
+
 static SocketsHttpHandler CreateEgressHandler(string? proxyAddress)
 {
     var handler = new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(15), PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
@@ -2199,3 +2344,4 @@ public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId);
 public sealed record ContentApprovalRequest(string? Comment);
 
 public sealed record GrowthAgentSettingsRequest(bool Enabled);
+public sealed record AutomationRuleRequest(string? Name, string? Trigger, string? ConditionField, string? ConditionOperator, string? ConditionValue, string? ActionType, string? ActivityType, string? ActionValue, bool IsEnabled = true);
