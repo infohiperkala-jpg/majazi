@@ -7,7 +7,8 @@ import "./content.css";
 type Organization={id:string;name:string;role:string};
 type Brand={id:string;name:string};
 type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null;brandId?:string|null;title:string;content:string;channel:string;tone:string;status:string;aiModel?:string|null;createdAt:string;updatedAt:string;approvedAt?:string|null;versionCount?:number;versions?:Version[]};
-type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};\ntype Approval={id:string;reviewRound:number;stageNumber:number;decision:string;comment?:string|null;actorUserId:string;createdAt:string};
+type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
+type Approval={id:string;reviewRound:number;stageNumber:number;decision:string;comment?:string|null;actorUserId:string;createdAt:string};
 type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
 type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
 type CalendarItem={id:string;title:string;channel:string;status:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null};
@@ -80,8 +81,15 @@ export default function ContentStudioPage(){
  }
  async function approve(){
   if(!selected)return;await run(async()=>{
-   await api(base+"/drafts/"+selected+"/approve",token,{method:"POST"});
-   await openDraft(selected);await refresh();setNotice("محتوا تأیید شد.");
+   const result=await api<{status:string;message:string}>(base+"/drafts/"+selected+"/approve",token,{method:"POST",body:JSON.stringify({comment:approvalComment})});
+   await openDraft(selected);await refresh();setNotice(result.message);
+  });
+ }
+ async function reject(){
+  if(!selected)return;await run(async()=>{
+   if(!approvalComment.trim())throw new Error("برای رد محتوا، دلیل بازبینی را وارد کنید.");
+   await api(base+"/drafts/"+selected+"/reject",token,{method:"POST",body:JSON.stringify({comment:approvalComment})});
+   await openDraft(selected);await refresh();setNotice("محتوا برای اصلاح به پیش‌نویس بازگشت.");
   });
  }
  if(!token)return <main className="studio-shell"><section className="studio-empty"><h1>استودیوی محتوای MAJAZI</h1><p>برای دسترسی ابتدا وارد پنل شوید.</p><Link href="/">بازگشت به داشبورد</Link></section></main>;
@@ -111,7 +119,7 @@ export default function ContentStudioPage(){
    </aside>
    <section className="studio-library">
     <div className="studio-section-title"><span>02 / LIBRARY</span><h2>کتابخانه محتوا</h2><p>پیش‌نویس‌ها و محتوای تأییدشده سازمان</p></div>
-    <div className="studio-library-tools"><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void run(()=>refresh());}} placeholder="جست‌وجوی عنوان یا متن..."/><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="All">همه وضعیت‌ها</option><option value="Draft">پیش‌نویس</option><option value="Approved">تأییدشده</option><option value="Scheduled">زمان‌بندی‌شده</option><option value="Publishing">در حال انتشار</option><option value="Published">منتشرشده</option><option value="PublishFailed">خطای انتشار</option></select><button onClick={()=>void run(()=>refresh())}>جست‌وجو</button></div>
+    <div className="studio-library-tools"><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void run(()=>refresh());}} placeholder="جست‌وجوی عنوان یا متن..."/><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="All">همه وضعیت‌ها</option><option value="Draft">پیش‌نویس</option><option value="InReview">در انتظار تأیید دوم</option><option value="Approved">تأییدشده</option><option value="Scheduled">زمان‌بندی‌شده</option><option value="Publishing">در حال انتشار</option><option value="Published">منتشرشده</option><option value="PublishFailed">خطای انتشار</option></select><button onClick={()=>void run(()=>refresh())}>جست‌وجو</button></div>
     <div className="studio-draft-list">{items.length===0?<div className="studio-no-drafts"><strong>هنوز محتوایی ثبت نشده است</strong><p>اولین محتوا را از فرم تولید بسازید یا پس از تولید در این فهرست ویرایش کنید.</p></div>:items.map(item=><button key={item.id} className={"studio-draft-row "+(selected===item.id?"active":"")} onClick={()=>void run(()=>openDraft(item.id))}><span className="draft-channel">{item.channel}</span><span className="draft-main"><strong>{item.title}</strong><small>{item.scheduledAt?"انتشار: "+new Date(item.scheduledAt).toLocaleString("fa-IR"):new Date(item.updatedAt).toLocaleString("fa-IR")} · {item.versionCount??0} نسخه</small></span><span className={"draft-status "+(item.status==="Approved"?"approved":"")}>{statuses[item.status]??item.status}</span></button>)}</div>
    </section>
   </section>
