@@ -3024,10 +3024,17 @@ static async Task QueueAutomationRunsAsync(MajaziDbContext db, Guid organization
         .Select(x => x.Id).ToListAsync(ct);
     if (rules.Count == 0) return;
     var payloadJson = JsonSerializer.Serialize(payload);
-    db.AutomationRuns.AddRange(rules.Select(ruleId => new AutomationRun
+    var eventKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+        $"{trigger}|{subjectType}|{subjectId:D}|{payloadJson}")));
+    var existing = await db.AutomationRuns.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.EventKey == eventKey)
+        .Select(x => x.RuleId).ToListAsync(ct);
+    var existingRuleIds = existing.ToHashSet();
+    db.AutomationRuns.AddRange(rules.Where(ruleId => !existingRuleIds.Contains(ruleId)).Select(ruleId => new AutomationRun
     {
         OrganizationId = organizationId, RuleId = ruleId, Trigger = trigger,
-        SubjectType = subjectType, SubjectId = subjectId, PayloadJson = payloadJson, Status = "Pending"
+        SubjectType = subjectType, SubjectId = subjectId, PayloadJson = payloadJson,
+        EventKey = eventKey, Status = "Pending"
     }));
 }
 

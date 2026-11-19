@@ -255,6 +255,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
             b.Property<string>("Error").HasMaxLength(1000).HasColumnType("character varying(1000)");
             b.Property<int>("AttemptCount").HasColumnType("integer");
+            b.Property<string>("EventKey").HasMaxLength(128).HasColumnType("character varying(128)");
             b.Property<string>("PayloadJson").IsRequired().HasColumnType("jsonb");
             b.Property<string>("Result").HasMaxLength(1000).HasColumnType("character varying(1000)");
             b.Property<Guid>("RuleId").HasColumnType("uuid");
@@ -266,6 +267,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<string>("Trigger").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
             b.HasKey("Id");
             b.HasIndex("OrganizationId", "RuleId", "CreatedAt");
+            b.HasIndex("OrganizationId", "RuleId", "EventKey").IsUnique().HasFilter("\"EventKey\" IS NOT NULL");
             b.HasIndex("RuleId");
             b.HasIndex("Status", "CreatedAt");
             b.ToTable("automation_runs", (string)null);
