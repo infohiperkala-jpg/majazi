@@ -781,7 +781,9 @@ ordersApi.MapPost("/", async (Guid organizationId, SalesOrderRequest request, Cl
             line.Quantity <= 0 || line.Quantity > 1000000 || line.UnitPrice < 0 || line.UnitPrice > 9999999999999999m ||
             line.Discount < 0 || line.Discount > line.Quantity * line.UnitPrice)
             return Results.BadRequest(new { error = "نام، تعداد، قیمت یا تخفیف یکی از ردیف‌ها معتبر نیست." });
-        var gross = Math.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        var quantity = Math.Round(line.Quantity, 3);
+        var gross = Math.Round(quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        if (gross > 9999999999999999m) return Results.BadRequest(new { error = "مبلغ یک ردیف از محدوده مجاز بیشتر است." });
         var lineDiscount = Math.Round(line.Discount, 2, MidpointRounding.AwayFromZero);
         var lineTotal = gross - lineDiscount;
         subtotal += lineTotal;
@@ -839,7 +841,7 @@ ordersApi.MapPut("/{orderId:guid}", async (Guid organizationId, Guid orderId, Sa
         calculated.Add(new SalesOrderLine { OrderId = order.Id, Name = name, Sku = Clean(line.Sku), Quantity = quantity, UnitPrice = Math.Round(line.UnitPrice, 2), Discount = lineDiscount, LineTotal = lineTotal, SortOrder = index });
     }
     var discount = Math.Round(request.Discount, 2); var tax = Math.Round(request.Tax, 2);
-    if (discount > subtotal || subtotal - discount + tax > 9999999999999999m)
+    if (subtotal > 9999999999999999m || discount > subtotal || subtotal - discount + tax > 9999999999999999m)
         return Results.BadRequest(new { error = "مبلغ تخفیف یا مبلغ نهایی معتبر نیست." });
     order.ContactId = request.ContactId; order.Currency = currency; order.Subtotal = subtotal; order.Discount = discount;
     order.Tax = tax; order.Total = subtotal - discount + tax; order.Notes = Clean(request.Notes);
