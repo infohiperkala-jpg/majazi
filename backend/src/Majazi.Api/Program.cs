@@ -1822,6 +1822,7 @@ public sealed record UpdateInboxConversationRequest(string? Status, Guid? Assign
 
 record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string DisplayName);
 
+public sealed record CreateManualContentDraftRequest(Guid? BrandId, string? Title, string? Content, string? Channel, string? Tone);
 public sealed record GenerateContentRequest(Guid? BrandId, string? Topic, string? Channel, string? Tone, string? Instructions);
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
 
