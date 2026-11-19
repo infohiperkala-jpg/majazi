@@ -2936,9 +2936,40 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         Status = "Queued", CreatedByUserId = userId.Value
     };
 
+    // WhatsApp Cloud API delivery.
+    if (conversation.ChannelConnection?.Provider == "WhatsApp")
+    {
+        var channel = conversation.ChannelConnection;
+        if (channel.Status != "Connected" || string.IsNullOrWhiteSpace(channel.EncryptedAccessToken) || string.IsNullOrWhiteSpace(channel.ExternalAccountId))
+            return Results.Conflict(new { error = "اتصال WhatsApp باید با Phone Number ID و توکن معتبر تأیید شده باشد." });
+        if (string.IsNullOrWhiteSpace(conversation.ExternalConversationId) || conversation.ExternalConversationId.Length > 32 ||
+            !conversation.ExternalConversationId.All(ch => char.IsAsciiDigit(ch) || ch == '+'))
+            return Results.Conflict(new { error = "شناسه گیرنده WhatsApp معتبر نیست؛ مکالمه باید از webhook رسمی دریافت شده باشد." });
+        string tokenValue;
+        try { tokenValue = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن WhatsApp قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
+        var version = "v22.0";
+        try
+        {
+            using var outbound = new HttpRequestMessage(HttpMethod.Post, $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(channel.ExternalAccountId)}/messages");
+            outbound.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenValue);
+            outbound.Content = JsonContent.Create(new { messaging_product = "whatsapp", recipient_type = "individual",
+                to = conversation.ExternalConversationId, type = "text", text = new { preview_url = false, body } });
+            using var response = await httpClientFactory.CreateClient("MetaOAuth").SendAsync(outbound, ct);
+            using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            if (!response.IsSuccessStatusCode)
+                return Results.Problem("WhatsApp Cloud API ارسال پیام را نپذیرفت؛ تنظیمات شماره و پنجره مجاز پیام‌رسانی را بررسی کنید.", statusCode: 502);
+            if (payload.RootElement.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array &&
+                messages.GetArrayLength() > 0 && messages[0].TryGetProperty("id", out var waMessageId))
+                message.ExternalMessageId = waMessageId.GetString();
+            message.Status = "Sent"; message.SentAt = DateTimeOffset.UtcNow;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return Results.Problem("ارسال WhatsApp timeout شد؛ وضعیت تحویل را در Meta بررسی کنید.", statusCode: 504); }
+        catch (HttpRequestException) { return Results.Problem("ارتباط با WhatsApp Cloud API برقرار نشد.", statusCode: 502); }
+    }
     // Telegram replies are delivered synchronously through the official Bot API.
-    // Other providers remain explicitly queued until their official delivery adapter is implemented.
-    if (conversation.ChannelConnection?.Provider == "Telegram")
+    // Providers without a delivery adapter remain explicitly queued.
+    else if (conversation.ChannelConnection?.Provider == "Telegram")
     {
         if (conversation.ChannelConnection.Status != "Connected" ||
             string.IsNullOrWhiteSpace(conversation.ChannelConnection.EncryptedAccessToken))
