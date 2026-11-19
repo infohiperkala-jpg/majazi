@@ -111,27 +111,37 @@ export default function Home() {
     }
 
     // Validate the saved token with the API before opening protected pages.
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 7000);
+
     fetch("/backend-api/api/auth/me", {
       headers: { Authorization: "Bearer " + token },
       cache: "no-store",
+      signal: controller.signal,
     }).then((response) => {
       if (!active) return;
       if (response.ok) {
         setAuthenticated(true);
+        setAuthError("");
       } else if (response.status === 401 || response.status === 403) {
         localStorage.removeItem("majazi_access_token");
         setAuthenticated(false);
+        setAuthError("نشست شما معتبر نیست؛ دوباره وارد شوید.");
       } else {
-        // Keep the session during temporary API/server errors.
-        setAuthenticated(true);
+        // Fail closed: never expose protected pages when session validation failed.
+        setAuthenticated(false);
+        setAuthError("اعتبارسنجی نشست انجام نشد. اتصال سرویس را بررسی و دوباره وارد شوید.");
       }
     }).catch(() => {
-      if (active) setAuthenticated(true);
+      if (!active) return;
+      setAuthenticated(false);
+      setAuthError("ارتباط با سرور برای بررسی نشست برقرار نشد. پس از بررسی اتصال دوباره تلاش کنید.");
     }).finally(() => {
+      window.clearTimeout(timeout);
       if (active) setAuthReady(true);
     });
 
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
   }, []);
   useEffect(() => { if (authenticated) void loadOrganizations(); }, [authenticated, loadOrganizations]);
 
