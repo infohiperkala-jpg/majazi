@@ -1021,12 +1021,12 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var scheduledAt = request.ScheduledAt;
     if (scheduledAt is null || scheduledAt <= DateTimeOffset.UtcNow.AddMinutes(1) || scheduledAt > DateTimeOffset.UtcNow.AddYears(1))
         return Results.BadRequest(new { error = "زمان انتشار باید حداقل یک دقیقه بعد و حداکثر تا یک سال آینده باشد." });
-    if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (string.IsNullOrWhiteSpace(request.TargetChatId) || request.TargetChatId.Length > 180 ||
         !long.TryParse(request.TargetChatId, out _))
         return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام را وارد کنید." });
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
+    if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (draft.Status != "Approved") return Results.Conflict(new { error = "ابتدا محتوا باید تأیید نهایی شود." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
         x.Id == request.ConnectionId && x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected", ct);
