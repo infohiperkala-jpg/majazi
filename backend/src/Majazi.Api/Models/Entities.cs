@@ -246,3 +246,38 @@ public sealed class TextTemplate
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public sealed class AutomationRule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public required string Name { get; set; }
+    public required string Trigger { get; set; }
+    public string ConditionField { get; set; } = "Any";
+    public string ConditionOperator { get; set; } = "Equals";
+    public string? ConditionValue { get; set; }
+    public required string ActionType { get; set; }
+    public string? ActivityType { get; set; }
+    public required string ActionValue { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class AutomationRun
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid RuleId { get; set; }
+    public required string Trigger { get; set; }
+    public required string SubjectType { get; set; }
+    public Guid SubjectId { get; set; }
+    public string PayloadJson { get; set; } = "{}";
+    public string Status { get; set; } = "Pending";
+    public string? Result { get; set; }
+    public string? Error { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+}

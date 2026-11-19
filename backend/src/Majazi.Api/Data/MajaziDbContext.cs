@@ -21,9 +21,41 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<ContentApprovalRecord> ContentApprovalRecords => Set<ContentApprovalRecord>();
     public DbSet<StatusDefinition> StatusDefinitions => Set<StatusDefinition>();
     public DbSet<TextTemplate> TextTemplates => Set<TextTemplate>();
+    public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
+    public DbSet<AutomationRun> AutomationRuns => Set<AutomationRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AutomationRule>(e =>
+        {
+            e.ToTable("automation_rules"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            e.Property(x => x.Trigger).HasMaxLength(40).IsRequired();
+            e.Property(x => x.ConditionField).HasMaxLength(40).IsRequired();
+            e.Property(x => x.ConditionOperator).HasMaxLength(20).IsRequired();
+            e.Property(x => x.ConditionValue).HasMaxLength(240);
+            e.Property(x => x.ActionType).HasMaxLength(40).IsRequired();
+            e.Property(x => x.ActivityType).HasMaxLength(32);
+            e.Property(x => x.ActionValue).HasMaxLength(1000).IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.Trigger, x.IsEnabled });
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<AutomationRun>(e =>
+        {
+            e.ToTable("automation_runs"); e.HasKey(x => x.Id);
+            e.Property(x => x.Trigger).HasMaxLength(40).IsRequired();
+            e.Property(x => x.SubjectType).HasMaxLength(24).IsRequired();
+            e.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            e.Property(x => x.Result).HasMaxLength(1000);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
+            e.HasIndex(x => new { x.OrganizationId, x.RuleId, x.CreatedAt });
+            e.HasIndex(x => x.RuleId);
+            e.HasOne<AutomationRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<TextTemplate>(e =>
         {
             e.ToTable("text_templates"); e.HasKey(x => x.Id);
