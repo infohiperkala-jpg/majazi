@@ -35,6 +35,7 @@ builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = Time
 builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient("AIProvider", client => client.Timeout = TimeSpan.FromSeconds(90));
 builder.Services.AddHostedService<ContentPublishingWorker>();
+builder.Services.AddHostedService<GrowthAgentWorker>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
