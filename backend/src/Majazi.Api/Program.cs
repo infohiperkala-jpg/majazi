@@ -1435,7 +1435,6 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
                 x.Id != item.Id && x.OrganizationId == organizationId && x.Provider == item.Provider && x.ExternalAccountId == id, ct))
                 return Results.Conflict(new { error = "این ربات قبلاً در همین سازمان ثبت شده است." });
             if (!string.IsNullOrWhiteSpace(id)) item.ExternalAccountId = id;
-            if (!string.IsNullOrWhiteSpace(username)) item.DisplayName = item.DisplayName;
             item.Status = "Connected"; item.UpdatedAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(ct);
             return Results.Ok(new { item.Id, item.Provider, item.DisplayName, item.ExternalAccountId, Username = username, item.Status, VerifiedAt = item.UpdatedAt });
         }
