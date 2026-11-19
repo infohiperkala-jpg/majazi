@@ -3445,12 +3445,12 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
             return Results.Conflict(new { error = $"ربات {channel.Provider} متصل و تأییدشده نیست." });
         if (string.IsNullOrWhiteSpace(conversation.ExternalConversationId) || conversation.ExternalConversationId.Length > 180)
             return Results.Conflict(new { error = "شناسه گفتگوی پیام‌رسان معتبر نیست؛ مکالمه باید از وب‌هوک رسمی دریافت شده باشد." });
-        string botToken;
-        try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
+        string iranianBotToken;
+        try { iranianBotToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
         catch (CryptographicException) { return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
         var endpoint = channel.Provider == "Bale"
-            ? $"https://tapi.bale.ai/bot{botToken}/sendMessage"
-            : $"https://botapi.rubika.ir/v3/{botToken}/sendMessage";
+            ? $"https://tapi.bale.ai/bot{iranianBotToken}/sendMessage"
+            : $"https://botapi.rubika.ir/v3/{iranianBotToken}/sendMessage";
         try
         {
             using var response = await httpClientFactory.CreateClient("TelegramBotApi").PostAsJsonAsync(endpoint,
