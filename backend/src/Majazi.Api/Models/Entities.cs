@@ -342,3 +342,49 @@ public sealed class OrganizationAiProviderSetting
     public Guid UpdatedByUserId { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public sealed class SalesOrder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? ContactId { get; set; }
+    public required string OrderNumber { get; set; }
+    public string Status { get; set; } = "Draft";
+    public string Currency { get; set; } = "IRR";
+    public decimal Subtotal { get; set; }
+    public decimal Discount { get; set; }
+    public decimal Tax { get; set; }
+    public decimal Total { get; set; }
+    public string? Notes { get; set; }
+    public int Version { get; set; } = 1;
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class SalesOrderLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrderId { get; set; }
+    public required string Name { get; set; }
+    public string? Sku { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal Discount { get; set; }
+    public decimal LineTotal { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public sealed class PaymentTransaction
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrderId { get; set; }
+    public decimal Amount { get; set; }
+    public required string Method { get; set; }
+    public required string Status { get; set; }
+    public string? Reference { get; set; }
+    public string? Note { get; set; }
+    public DateTimeOffset? PaidAt { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
