@@ -1294,6 +1294,35 @@ contentApi.MapGet("/drafts", async (Guid organizationId, ClaimsPrincipal princip
     return Results.Ok(items);
 });
 
+contentApi.MapPost("/drafts", async (Guid organizationId, CreateManualContentDraftRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var title = request.Title?.Trim();
+    var content = request.Content?.Trim();
+    var channel = string.IsNullOrWhiteSpace(request.Channel) ? "General" : request.Channel.Trim();
+    var tone = string.IsNullOrWhiteSpace(request.Tone) ? "Professional" : request.Tone.Trim();
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(content) ||
+        content.Length > 30000 || channel.Length > 40 || tone.Length > 40)
+        return Results.BadRequest(new { error = "عنوان، متن، کانال یا لحن معتبر نیست." });
+    var draft = new ContentDraft
+    {
+        OrganizationId = organizationId, BrandId = request.BrandId, CreatedByUserId = userId.Value,
+        Title = title, Content = content, Channel = channel, Tone = tone,
+        Prompt = "ایجاد دستی محتوا"
+    };
+    draft.Versions.Add(new ContentDraftVersion
+    {
+        DraftId = draft.Id, VersionNumber = 1, Title = draft.Title, Content = draft.Content,
+        ChangeNote = "نسخه اولیه ایجاد دستی", CreatedByUserId = userId.Value
+    });
+    db.ContentDrafts.Add(draft);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/content/drafts/{draft.Id}",
+        new { draft.Id, draft.Title, draft.Content, draft.Channel, draft.Tone, draft.Status, draft.CreatedAt, versionCount = 1 });
+});
+
 contentApi.MapPost("/generate", async (Guid organizationId, GenerateContentRequest request,
     ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config,
     IHttpClientFactory clients, CancellationToken ct) =>
