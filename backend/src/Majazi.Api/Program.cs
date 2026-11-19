@@ -368,13 +368,11 @@ app.MapDelete("/api/brands/{id:guid}", async (Guid id, ClaimsPrincipal principal
 
 const string statusKeyPattern = "^[a-z0-9][a-z0-9._-]{0,63}$";
 var statusesApi = app.MapGroup("/api/organizations/{organizationId:guid}/statuses").RequireAuthorization();
-var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign", "inbox.conversation", "content.draft"]);
+var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign"]);
 var defaultStatusesByModule = new Dictionary<string, (string Key, string Label, string Color)[]>
 {
     ["crm.lead"] = [("new", "جدید", "#64748b"), ("qualified", "ارزیابی‌شده", "#2563eb"), ("proposal", "پیشنهاد", "#7c3aed"), ("negotiation", "مذاکره", "#d97706"), ("won", "موفق", "#16a34a"), ("lost", "از دست‌رفته", "#dc2626")],
     ["campaign"] = [("draft", "پیش‌نویس", "#64748b"), ("scheduled", "زمان‌بندی‌شده", "#2563eb"), ("active", "فعال", "#16a34a"), ("paused", "متوقف", "#d97706"), ("completed", "پایان‌یافته", "#0f766e"), ("cancelled", "لغوشده", "#dc2626")],
-    ["inbox.conversation"] = [("open", "باز", "#2563eb"), ("pending", "در انتظار", "#d97706"), ("resolved", "بسته‌شده", "#16a34a")],
-    ["content.draft"] = [("draft", "پیش‌نویس", "#64748b"), ("in_review", "در حال بازبینی", "#7c3aed"), ("approved", "تأییدشده", "#16a34a"), ("scheduled", "زمان‌بندی‌شده", "#2563eb"), ("published", "منتشرشده", "#0f766e")]
 };
 
 statusesApi.MapGet("/", async (Guid organizationId, string? module, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
