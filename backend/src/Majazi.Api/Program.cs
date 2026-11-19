@@ -1460,6 +1460,178 @@ templatesApi.MapDelete("/{templateId:guid}", async (Guid organizationId, Guid te
     return Results.NoContent();
 });
 
+var knowledgeApi = app.MapGroup("/api/organizations/{organizationId:guid}/knowledge").RequireAuthorization();
+
+knowledgeApi.MapGet("/articles", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    string? q, string? category, string? status, int? page, int? pageSize, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var query = db.KnowledgeArticles.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        query = query.Where(x => x.Title.Contains(term) || (x.Summary != null && x.Summary.Contains(term)) ||
+            x.Body.Contains(term) || x.Tags.Contains(term) || x.Category.Contains(term));
+    }
+    if (!string.IsNullOrWhiteSpace(category)) query = query.Where(x => x.Category == category);
+    if (string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status != "Archived");
+    else if (status != "All") query = query.Where(x => x.Status == status);
+    var total = await query.CountAsync(ct);
+    var currentPage = Math.Clamp(page ?? 1, 1, 10000);
+    var take = Math.Clamp(pageSize ?? 25, 1, 100);
+    var items = await query.OrderByDescending(x => x.UpdatedAt)
+        .Skip((currentPage - 1) * take).Take(take)
+        .Select(x => new { x.Id, x.Title, x.Slug, x.Summary, x.Category, x.Tags, x.Status, x.Version,
+            x.CreatedByUserId, x.UpdatedByUserId, x.PublishedAt, x.CreatedAt, x.UpdatedAt })
+        .ToListAsync(ct);
+    var categories = await db.KnowledgeArticles.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.Status != "Archived")
+        .Select(x => x.Category).Distinct().OrderBy(x => x).ToListAsync(ct);
+    return Results.Ok(new { items, total, page = currentPage, pageSize = take, categories });
+});
+
+knowledgeApi.MapGet("/articles/{articleId:guid}", async (Guid organizationId, Guid articleId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var article = await db.KnowledgeArticles.AsNoTracking()
+        .Where(x => x.Id == articleId && x.OrganizationId == organizationId)
+        .Select(x => new { x.Id, x.Title, x.Slug, x.Summary, x.Body, x.Category, x.Tags, x.Status, x.Version,
+            x.CreatedByUserId, x.UpdatedByUserId, x.PublishedAt, x.CreatedAt, x.UpdatedAt })
+        .SingleOrDefaultAsync(ct);
+    return article is null ? Results.NotFound() : Results.Ok(article);
+});
+
+knowledgeApi.MapGet("/articles/{articleId:guid}/revisions", async (Guid organizationId, Guid articleId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    if (!await db.KnowledgeArticles.AnyAsync(x => x.Id == articleId && x.OrganizationId == organizationId, ct)) return Results.NotFound();
+    var items = await db.KnowledgeArticleRevisions.AsNoTracking().Where(x => x.ArticleId == articleId)
+        .OrderByDescending(x => x.Version).Take(100)
+        .Select(x => new { x.Id, x.Version, x.Title, x.Summary, x.Body, x.Category, x.Tags, x.ChangeNote, x.CreatedByUserId, x.CreatedAt })
+        .ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+knowledgeApi.MapPost("/articles", async (Guid organizationId, KnowledgeArticleRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var title = request.Title?.Trim(); var slug = request.Slug?.Trim().ToLowerInvariant();
+    var body = request.Body?.Trim(); var category = request.Category?.Trim();
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(body) || body.Length > 60000 ||
+        (request.Summary?.Length ?? 0) > 500 || string.IsNullOrWhiteSpace(category) || category.Length > 100 ||
+        (request.Tags?.Length ?? 0) > 1000 || (request.ChangeNote?.Length ?? 0) > 300)
+        return Results.BadRequest(new { error = "عنوان، متن، دسته‌بندی یا طول اطلاعات مقاله معتبر نیست." });
+    if (string.IsNullOrWhiteSpace(slug)) slug = "article-" + Guid.NewGuid().ToString("N")[..12];
+    if (slug.Length > 160 || !slug.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-') || slug.StartsWith('-') || slug.EndsWith('-') || slug.Contains("--"))
+        return Results.BadRequest(new { error = "شناسه مقاله باید فقط شامل حروف انگلیسی کوچک، عدد و خط تیره باشد." });
+    if (await db.KnowledgeArticles.AnyAsync(x => x.OrganizationId == organizationId && x.Slug == slug, ct))
+        return Results.Conflict(new { error = "این شناسه در همین سازمان قبلاً استفاده شده است." });
+    var tags = string.Join(", ", (request.Tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(x => x.Length <= 60).Distinct(StringComparer.OrdinalIgnoreCase).Take(20));
+    var now = DateTimeOffset.UtcNow;
+    var article = new KnowledgeArticle
+    {
+        OrganizationId = organizationId, Title = title, Slug = slug, Summary = Clean(request.Summary),
+        Body = body, Category = category, Tags = tags, Status = "Draft",
+        CreatedByUserId = userId.Value, UpdatedByUserId = userId.Value, CreatedAt = now, UpdatedAt = now, Version = 1
+    };
+    db.KnowledgeArticles.Add(article);
+    db.KnowledgeArticleRevisions.Add(new KnowledgeArticleRevision
+    {
+        ArticleId = article.Id, Version = 1, Title = title, Summary = article.Summary ?? "",
+        Body = body, Category = category, Tags = tags, ChangeNote = Clean(request.ChangeNote) ?? "نسخه اولیه",
+        CreatedByUserId = userId.Value, CreatedAt = now
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/knowledge/articles/{article.Id}",
+        new { article.Id, article.Title, article.Slug, article.Summary, article.Category, article.Tags,
+            article.Status, article.Version, article.CreatedAt, article.UpdatedAt });
+});
+
+knowledgeApi.MapPut("/articles/{articleId:guid}", async (Guid organizationId, Guid articleId, KnowledgeArticleRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var article = await db.KnowledgeArticles.SingleOrDefaultAsync(x => x.Id == articleId && x.OrganizationId == organizationId, ct);
+    if (article is null) return Results.NotFound();
+    if (article.Status == "Archived") return Results.Conflict(new { error = "مقاله بایگانی شده است؛ ابتدا آن را به پیش‌نویس بازگردانید." });
+    if (request.Version != article.Version) return Results.Conflict(new { error = "نسخه مقاله تغییر کرده است؛ اطلاعات را تازه‌سازی و دوباره ذخیره کنید.", currentVersion = article.Version });
+    var title = request.Title?.Trim(); var slug = request.Slug?.Trim().ToLowerInvariant();
+    var body = request.Body?.Trim(); var category = request.Category?.Trim();
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(body) || body.Length > 60000 ||
+        string.IsNullOrWhiteSpace(slug) || slug.Length > 160 || !slug.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-') ||
+        slug.StartsWith('-') || slug.EndsWith('-') || slug.Contains("--") ||
+        string.IsNullOrWhiteSpace(category) || category.Length > 100 ||
+        (request.Summary?.Length ?? 0) > 500 || (request.Tags?.Length ?? 0) > 1000 || (request.ChangeNote?.Length ?? 0) > 300)
+        return Results.BadRequest(new { error = "اطلاعات مقاله معتبر نیست." });
+    if (await db.KnowledgeArticles.AnyAsync(x => x.OrganizationId == organizationId && x.Id != articleId && x.Slug == slug, ct))
+        return Results.Conflict(new { error = "این شناسه در همین سازمان قبلاً استفاده شده است." });
+    var tags = string.Join(", ", (request.Tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(x => x.Length <= 60).Distinct(StringComparer.OrdinalIgnoreCase).Take(20));
+    article.Title = title; article.Slug = slug; article.Summary = Clean(request.Summary);
+    article.Body = body; article.Category = category; article.Tags = tags;
+    article.Version++; article.UpdatedByUserId = userId.Value; article.UpdatedAt = DateTimeOffset.UtcNow;
+    db.KnowledgeArticleRevisions.Add(new KnowledgeArticleRevision
+    {
+        ArticleId = article.Id, Version = article.Version, Title = article.Title, Summary = article.Summary ?? "",
+        Body = article.Body, Category = article.Category, Tags = article.Tags,
+        ChangeNote = Clean(request.ChangeNote) ?? "ویرایش مقاله", CreatedByUserId = userId.Value
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { article.Id, article.Title, article.Slug, article.Summary, article.Category, article.Tags,
+        article.Status, article.Version, article.PublishedAt, article.UpdatedAt });
+});
+
+knowledgeApi.MapPatch("/articles/{articleId:guid}/status", async (Guid organizationId, Guid articleId,
+    KnowledgeArticleStatusRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (request.Status is not ("Draft" or "Published" or "Archived")) return Results.BadRequest(new { error = "وضعیت مقاله معتبر نیست." });
+    if ((request.Status is "Published" or "Archived") && membership.Role is not ("Owner" or "Admin"))
+        return Results.Forbid();
+    var article = await db.KnowledgeArticles.SingleOrDefaultAsync(x => x.Id == articleId && x.OrganizationId == organizationId, ct);
+    if (article is null) return Results.NotFound();
+    article.Status = request.Status;
+    article.PublishedAt = request.Status == "Published" ? article.PublishedAt ?? DateTimeOffset.UtcNow : null;
+    article.UpdatedByUserId = userId.Value; article.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { article.Id, article.Status, article.PublishedAt, article.UpdatedAt });
+});
+
+knowledgeApi.MapPost("/articles/{articleId:guid}/revisions/{revisionId:guid}/restore", async (Guid organizationId, Guid articleId,
+    Guid revisionId, KnowledgeRestoreRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var article = await db.KnowledgeArticles.SingleOrDefaultAsync(x => x.Id == articleId && x.OrganizationId == organizationId, ct);
+    var revision = await db.KnowledgeArticleRevisions.SingleOrDefaultAsync(x => x.Id == revisionId && x.ArticleId == articleId, ct);
+    if (article is null || revision is null) return Results.NotFound();
+    if (article.Status == "Archived") return Results.Conflict(new { error = "ابتدا مقاله را از بایگانی خارج کنید." });
+    if (request.Version != article.Version) return Results.Conflict(new { error = "نسخه مقاله تغییر کرده است؛ صفحه را تازه‌سازی کنید.", currentVersion = article.Version });
+    article.Title = revision.Title; article.Summary = revision.Summary; article.Body = revision.Body;
+    article.Category = revision.Category; article.Tags = revision.Tags;
+    article.Version++; article.UpdatedByUserId = userId.Value; article.UpdatedAt = DateTimeOffset.UtcNow;
+    db.KnowledgeArticleRevisions.Add(new KnowledgeArticleRevision
+    {
+        ArticleId = article.Id, Version = article.Version, Title = article.Title, Summary = article.Summary ?? "",
+        Body = article.Body, Category = article.Category, Tags = article.Tags,
+        ChangeNote = Clean(request.ChangeNote) ?? $"بازیابی از نسخه {revision.Version}", CreatedByUserId = userId.Value
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { article.Id, article.Version, article.Title, article.UpdatedAt });
+});
+
 var automationApi = app.MapGroup("/api/organizations/{organizationId:guid}/automations").RequireAuthorization();
 
 automationApi.MapGet("/rules", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
@@ -2352,3 +2524,6 @@ public sealed record ContentApprovalRequest(string? Comment);
 
 public sealed record GrowthAgentSettingsRequest(bool Enabled);
 public sealed record AutomationRuleRequest(string? Name, string? Trigger, string? ConditionField, string? ConditionOperator, string? ConditionValue, string? ActionType, string? ActivityType, string? ActionValue, bool IsEnabled = true);
+public sealed record KnowledgeArticleRequest(string? Title, string? Slug, string? Summary, string? Body, string? Category, string? Tags, int Version = 0, string? ChangeNote = null);
+public sealed record KnowledgeArticleStatusRequest(string? Status);
+public sealed record KnowledgeRestoreRequest(int Version, string? ChangeNote);

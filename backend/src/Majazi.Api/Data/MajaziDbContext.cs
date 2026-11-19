@@ -23,9 +23,38 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
     public DbSet<TextTemplate> TextTemplates => Set<TextTemplate>();
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<AutomationRun> AutomationRuns => Set<AutomationRun>();
+    public DbSet<KnowledgeArticle> KnowledgeArticles => Set<KnowledgeArticle>();
+    public DbSet<KnowledgeArticleRevision> KnowledgeArticleRevisions => Set<KnowledgeArticleRevision>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<KnowledgeArticle>(e =>
+        {
+            e.ToTable("knowledge_articles"); e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(240).IsRequired();
+            e.Property(x => x.Slug).HasMaxLength(160).IsRequired();
+            e.Property(x => x.Summary).HasMaxLength(500);
+            e.Property(x => x.Body).HasMaxLength(60000).IsRequired();
+            e.Property(x => x.Category).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Tags).HasMaxLength(1000).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            e.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
+            e.HasIndex(x => new { x.OrganizationId, x.Status, x.UpdatedAt });
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<KnowledgeArticleRevision>(e =>
+        {
+            e.ToTable("knowledge_article_revisions"); e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(240).IsRequired();
+            e.Property(x => x.Summary).HasMaxLength(500).IsRequired();
+            e.Property(x => x.Body).HasMaxLength(60000).IsRequired();
+            e.Property(x => x.Category).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Tags).HasMaxLength(1000).IsRequired();
+            e.Property(x => x.ChangeNote).HasMaxLength(300);
+            e.HasIndex(x => new { x.ArticleId, x.Version }).IsUnique();
+            e.HasOne<KnowledgeArticle>().WithMany().HasForeignKey(x => x.ArticleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<AutomationRule>(e =>
         {
             e.ToTable("automation_rules"); e.HasKey(x => x.Id);
