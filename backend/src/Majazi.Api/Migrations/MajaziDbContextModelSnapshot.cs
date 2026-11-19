@@ -72,6 +72,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<Guid>("Id").HasColumnType("uuid");
             b.Property<DateTimeOffset>("ApprovedAt").HasColumnType("timestamp with time zone");
             b.Property<Guid?>("ApprovedByUserId").HasColumnType("uuid");
+            b.Property<int>("ApprovalRound").HasColumnType("integer");
             b.Property<string>("AiModel").HasMaxLength(120).HasColumnType("character varying(120)");
             b.Property<Guid?>("BrandId").HasColumnType("uuid");
             b.Property<string>("Channel").IsRequired().HasMaxLength(40).HasColumnType("character varying(40)");
@@ -94,6 +95,23 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.HasIndex("OrganizationId", "Status", "UpdatedAt");
             b.HasIndex("Status", "ScheduledAt");
             b.ToTable("content_drafts", (string)null);
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.ContentApprovalRecord", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<Guid>("ActorUserId").HasColumnType("uuid");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Decision").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
+            b.Property<Guid>("DraftId").HasColumnType("uuid");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<int>("ReviewRound").HasColumnType("integer");
+            b.Property<int>("StageNumber").HasColumnType("integer");
+            b.Property<string>("Comment").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "CreatedAt");
+            b.HasIndex("DraftId", "ReviewRound", "StageNumber").IsUnique();
+            b.ToTable("content_approval_records", (string)null);
         });
 
         modelBuilder.Entity("Majazi.Api.Models.ContentDraftVersion", b =>
