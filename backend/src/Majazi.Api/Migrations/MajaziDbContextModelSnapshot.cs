@@ -307,13 +307,17 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Navigation("ChannelConnection");
             b.Navigation("Contact");
             b.Navigation("Organization");
-            b.Navigation("Messages");
         });
 
         modelBuilder.Entity("Majazi.Api.Models.InboxMessage", b =>
         {
             b.HasOne("Majazi.Api.Models.InboxConversation", "Conversation").WithMany("Messages").HasForeignKey("ConversationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
             b.Navigation("Conversation");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
+        {
+            b.Navigation("Messages");
         });
 
         modelBuilder.Entity("Majazi.Api.Models.CrmContact", b =>
