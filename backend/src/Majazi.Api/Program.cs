@@ -3950,7 +3950,7 @@ static string? ValidateWhatsAppTemplate(string? name, string? language, string[]
     if (!hasTemplateInput) return null;
     name = name?.Trim();
     if (string.IsNullOrWhiteSpace(name) || name.Length > 512 ||
-        !name.All(ch => char.IsAsciiLower(ch) || char.IsAsciiDigit(ch) || ch == '_') ||
+        !name.All(ch => ch is >= 'a' and <= 'z' || char.IsAsciiDigit(ch) || ch == '_') ||
         name[0] == '_' || name[^1] == '_')
         return "نام قالب باید نام دقیق و تأییدشده Meta باشد و فقط از حروف کوچک انگلیسی، عدد و زیرخط تشکیل شود.";
     var locale = string.IsNullOrWhiteSpace(language) ? "en_US" : language.Trim();
