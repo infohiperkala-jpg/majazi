@@ -199,7 +199,8 @@ organizationsApi.MapGet("/", async (ClaimsPrincipal principal, MajaziDbContext d
     var userId = CurrentUserId(principal);
     if (userId is null) return Results.Unauthorized();
     var items = await db.OrganizationMemberships.AsNoTracking().Where(x => x.UserId == userId)
-        .OrderBy(x => x.Organization!.Name)
+        .OrderByDescending(x => x.Organization!.Slug == "digibail-demo")
+        .ThenBy(x => x.Organization!.Name)
         .Select(x => new { x.Organization!.Id, x.Organization.Name, x.Organization.Slug, x.Organization.CreatedAt, x.Role })
         .ToListAsync(ct);
     return Results.Ok(items);
