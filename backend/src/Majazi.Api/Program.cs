@@ -1218,6 +1218,13 @@ contentApi.MapPut("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
     if (draft is null) return Results.NotFound();
     if (draft.Status is "Scheduled" or "Publishing" or "Published")
         return Results.Conflict(new { error = "برای ویرایش، ابتدا زمان‌بندی را لغو کنید؛ محتوای منتشرشده یا در حال انتشار قابل تغییر نیست." });
+    if (draft.Status == "InReview")
+    {
+        draft.Status = "Draft";
+        draft.ApprovalRound++;
+        draft.ApprovedAt = null;
+        draft.ApprovedByUserId = null;
+    }
     var title = request.Title?.Trim(); var content = request.Content?.Trim();
     if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(content) || content.Length > 30000)
         return Results.BadRequest(new { error = "عنوان و متن محتوا الزامی است و طول آن باید معتبر باشد." });
@@ -1233,8 +1240,21 @@ contentApi.MapPut("/drafts/{draftId:guid}", async (Guid organizationId, Guid dra
     return Results.Ok(new { draft.Id, draft.Title, draft.Content, draft.Status, draft.UpdatedAt, versionCount = draft.Versions.Count });
 });
 
-contentApi.MapPost("/drafts/{draftId:guid}/approve", async (Guid organizationId, Guid draftId,
+contentApi.MapGet("/drafts/{draftId:guid}/approvals", async (Guid organizationId, Guid draftId,
     ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var records = await db.ContentApprovalRecords.AsNoTracking()
+        .Where(x => x.DraftId == draftId && x.OrganizationId == organizationId)
+        .OrderBy(x => x.ReviewRound).ThenBy(x => x.StageNumber)
+        .Select(x => new { x.Id, x.ReviewRound, x.StageNumber, x.Decision, x.Comment, x.ActorUserId, x.CreatedAt })
+        .ToListAsync(ct);
+    return Results.Ok(records);
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/approve", async (Guid organizationId, Guid draftId,
+    ContentApprovalRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null) return Results.Unauthorized();
@@ -1246,10 +1266,74 @@ contentApi.MapPost("/drafts/{draftId:guid}/approve", async (Guid organizationId,
     if (draft is null) return Results.NotFound();
     if (draft.Status is "Scheduled" or "Publishing" or "Published")
         return Results.Conflict(new { error = "محتوای زمان‌بندی‌شده یا منتشرشده قابل تأیید مجدد نیست." });
-    if (string.IsNullOrWhiteSpace(draft.Content)) return Results.Conflict(new { error = "محتوای خالی قابل تأیید نیست." });
-    draft.Status = "Approved"; draft.ApprovedAt = DateTimeOffset.UtcNow; draft.ApprovedByUserId = userId.Value; draft.UpdatedAt = DateTimeOffset.UtcNow;
+    if (string.IsNullOrWhiteSpace(draft.Content))
+        return Results.Conflict(new { error = "محتوای خالی قابل تأیید نیست." });
+
+    var round = Math.Max(1, draft.ApprovalRound);
+    var existing = await db.ContentApprovalRecords.AsNoTracking()
+        .Where(x => x.DraftId == draft.Id && x.ReviewRound == round)
+        .OrderBy(x => x.StageNumber).ToListAsync(ct);
+    if (existing.Any(x => x.ActorUserId == userId.Value))
+        return Results.Conflict(new { error = "برای تکمیل تأیید دوم، مدیر دیگری باید بازبینی کند." });
+    if (existing.Count >= 2)
+        return Results.Conflict(new { error = "این دور بازبینی قبلاً تکمیل شده است." });
+
+    var stage = existing.Count + 1;
+    if (stage == 2 && draft.Status != "InReview")
+        return Results.Conflict(new { error = "وضعیت درخواست بازبینی معتبر نیست." });
+
+    db.ContentApprovalRecords.Add(new ContentApprovalRecord
+    {
+        DraftId = draft.Id, OrganizationId = organizationId, ReviewRound = round,
+        StageNumber = stage, Decision = "Approved",
+        Comment = string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim()[..Math.Min(request.Comment.Trim().Length, 1000)],
+        ActorUserId = userId.Value, CreatedAt = DateTimeOffset.UtcNow
+    });
+    draft.Status = stage == 1 ? "InReview" : "Approved";
+    draft.UpdatedAt = DateTimeOffset.UtcNow;
+    if (stage == 2) { draft.ApprovedAt = DateTimeOffset.UtcNow; draft.ApprovedByUserId = userId.Value; }
     await db.SaveChangesAsync(ct);
-    return Results.Ok(new { draft.Id, draft.Status, draft.ApprovedAt });
+    return Results.Ok(new
+    {
+        draft.Id, draft.Status, draft.ApprovalRound, completedStage = stage,
+        requiredStages = 2, draft.ApprovedAt,
+        message = stage == 1 ? "مرحله اول ثبت شد؛ تأیید مدیر دوم لازم است." : "هر دو مرحله تأیید شد؛ محتوا آماده انتشار است."
+    });
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/reject", async (Guid organizationId, Guid draftId,
+    ContentApprovalRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (draft.Status is "Scheduled" or "Publishing" or "Published")
+        return Results.Conflict(new { error = "محتوای زمان‌بندی‌شده یا منتشرشده قابل رد نیست." });
+    var round = Math.Max(1, draft.ApprovalRound);
+    var existing = await db.ContentApprovalRecords.AsNoTracking()
+        .Where(x => x.DraftId == draft.Id && x.ReviewRound == round)
+        .ToListAsync(ct);
+    if (existing.Any(x => x.ActorUserId == userId.Value))
+        return Results.Conflict(new { error = "شما قبلاً در این دور بازبینی تصمیم ثبت کرده‌اید." });
+    var comment = request.Comment?.Trim();
+    if (string.IsNullOrWhiteSpace(comment))
+        return Results.BadRequest(new { error = "برای رد محتوا، دلیل بازبینی الزامی است." });
+    db.ContentApprovalRecords.Add(new ContentApprovalRecord
+    {
+        DraftId = draft.Id, OrganizationId = organizationId, ReviewRound = round,
+        StageNumber = existing.Count + 1, Decision = "Rejected",
+        Comment = comment[..Math.Min(comment.Length, 1000)],
+        ActorUserId = userId.Value, CreatedAt = DateTimeOffset.UtcNow
+    });
+    draft.Status = "Draft"; draft.ApprovalRound++; draft.ApprovedAt = null; draft.ApprovedByUserId = null;
+    draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { draft.Id, draft.Status, draft.ApprovalRound, message = "محتوا برای اصلاح به پیش‌نویس بازگشت." });
 });
 
 var inboxApi = app.MapGroup("/api/organizations/{organizationId:guid}/inbox").RequireAuthorization();
@@ -1510,3 +1594,6 @@ public sealed record EditContentDraftRequest(string? Title, string? Content, str
 
 public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt);
 public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId);
+
+
+public sealed record ContentApprovalRequest(string? Comment);
