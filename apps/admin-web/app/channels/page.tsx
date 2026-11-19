@@ -77,6 +77,16 @@ export default function ChannelsPage() {
       await reload(); setNotice("ربات تلگرام تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));
     });
   }
+  async function configureTelegramWebhook(item: Channel) {
+    await run(async () => {
+      const result = await request<{ configured: boolean; webhookUrl: string }>(
+        "/api/organizations/" + organizationId + "/channels/" + item.id + "/webhook",
+        token,
+        { method: "POST" }
+      );
+      setNotice("وب‌هوک تلگرام با موفقیت ثبت شد. دریافت پیام‌های جدید این ربات به صندوق ورودی متصل شد.");
+    });
+  }
   async function remove(item: Channel) {
     if (!window.confirm("اتصال ثبت‌شده «" + item.displayName + "» حذف شود؟")) return;
     await run(async () => { await request("/api/organizations/" + organizationId + "/channels/" + item.id, token, { method: "DELETE" }); await reload(); setNotice("اطلاعات اتصال حذف شد."); });
@@ -92,7 +102,7 @@ export default function ChannelsPage() {
       <article><span>نیازمند اقدام</span><strong>{items.filter(x => x.status !== "Connected").length.toLocaleString("en-US")}</strong><small>در انتظار اعتبارسنجی یا مجوز</small></article>
       <article><span>اتصال رسمی اینستاگرام</span><strong className={metaReady ? "metric-ready" : "metric-pending"}>{metaReady ? "آماده" : "نیازمند تنظیمات"}</strong><small>وضعیت پیکربندی OAuth سرور</small></article>
     </section>
-    <section className="channels-warning"><strong>نکته امنیتی و وضعیت اتصال</strong><p>توکن‌ها در پایگاه داده رمزنگاری می‌شوند و در پاسخ API نمایش داده نمی‌شوند. اتصال رسمی اینستاگرام از Business Login انجام می‌شود؛ دکمه اتصال زمانی فعال است که App ID، App Secret و Redirect URI امن روی سرور تنظیم شده باشند. فیسبوک و وب‌هوک‌ها هنوز فعال نشده‌اند.</p></section>
+    <section className="channels-warning"><strong>نکته امنیتی و وضعیت اتصال</strong><p>توکن‌ها در پایگاه داده رمزنگاری می‌شوند و در پاسخ API نمایش داده نمی‌شوند. اتصال رسمی اینستاگرام از Business Login انجام می‌شود؛ دکمه اتصال زمانی فعال است که App ID، App Secret و Redirect URI امن روی سرور تنظیم شده باشند. پس از تأیید ربات تلگرام، با دکمه «فعال‌سازی دریافت پیام» وب‌هوک امن را ثبت کنید. دریافت پیام‌های ورودی تلگرام از این مسیر به صندوق ورودی منتقل می‌شود. انتشار و دریافت پیام در سایر شبکه‌ها تا تکمیل مجوزهای رسمی فعال اعلام نمی‌شود.</p></section>
     <section className="channels-panel"><h2>ثبت کانال</h2><form className="channels-form" onSubmit={submit}>
       <label>پلتفرم<select value={provider} onChange={e => setProvider(e.target.value)}>{providers.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label>
       <label>نام نمایشی<input required maxLength={180} value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="مثلاً صفحه رسمی برند"/></label>
@@ -105,7 +115,7 @@ export default function ChannelsPage() {
       {items.length === 0 ? <p className="channels-empty">هنوز کانالی برای این سازمان ثبت نشده است.</p> : <div className="channels-list">{items.map(item => <article className="channel-card" key={item.id}>
         <div className="channel-mark">{item.provider === "Telegram" ? "TG" : item.provider === "Facebook" ? "FB" : "IG"}</div>
         <div className="channel-info"><strong>{item.displayName}</strong><span>{providers.find(x => x.id === item.provider)?.label ?? item.provider}{item.externalAccountId ? " · " + item.externalAccountId : ""}</span><small>{statusLabel[item.status] ?? item.status}{item.hasCredential ? " · دارای اعتبارنامه رمز‌شده" : " · بدون اعتبارنامه"}</small></div>
-        <div className="channel-actions">{item.provider === "Telegram" && item.hasCredential && <button type="button" className="channels-verify" disabled={busy} onClick={() => void verify(item)}>بررسی اتصال</button>}<button type="button" className="channels-delete" disabled={busy} onClick={() => void remove(item)}>حذف</button></div>
+        <div className="channel-actions">{item.provider === "Telegram" && item.hasCredential && <button type="button" className="channels-verify" disabled={busy} onClick={() => void verify(item)}>بررسی اتصال</button>{item.status === "Connected" && <button type="button" className="channels-verify" disabled={busy} onClick={() => void configureTelegramWebhook(item)}>فعال‌سازی دریافت پیام</button>}}<button type="button" className="channels-delete" disabled={busy} onClick={() => void remove(item)}>حذف</button></div>
       </article>)}</div>}
     </section>
     <footer>MAJAZI CHANNELS · داده‌ها در محدوده سازمان انتخاب‌شده نگهداری می‌شوند.</footer>
