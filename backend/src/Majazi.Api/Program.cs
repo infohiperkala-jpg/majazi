@@ -381,9 +381,9 @@ statusesApi.MapGet("/", async (Guid organizationId, string? module, ClaimsPrinci
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
-    var modulesToSeed = string.IsNullOrWhiteSpace(module)
+    IEnumerable<string> modulesToSeed = string.IsNullOrWhiteSpace(module)
         ? defaultStatusesByModule.Keys
-        : defaultStatusesByModule.ContainsKey(module) ? [module] : Array.Empty<string>();
+        : defaultStatusesByModule.ContainsKey(module) ? new[] { module } : Array.Empty<string>();
     foreach (var targetModule in modulesToSeed)
     {
         if (await db.StatusDefinitions.AnyAsync(x => x.OrganizationId == organizationId && x.Module == targetModule, ct)) continue;
