@@ -183,6 +183,7 @@ public sealed class ContentDraft
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ApprovedAt { get; set; }
     public Guid? ApprovedByUserId { get; set; }
+    public int ApprovalRound { get; set; } = 1;
     public DateTimeOffset? ScheduledAt { get; set; }
     public DateTimeOffset? PublishedAt { get; set; }
     public Guid? PublishConnectionId { get; set; }
@@ -209,6 +210,7 @@ public sealed class ContentApprovalRecord
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid DraftId { get; set; }
     public Guid OrganizationId { get; set; }
+    public int ReviewRound { get; set; } = 1;
     public int StageNumber { get; set; }
     public string Decision { get; set; } = "Approved";
     public string? Comment { get; set; }
