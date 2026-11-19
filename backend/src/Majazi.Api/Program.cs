@@ -368,11 +368,12 @@ app.MapDelete("/api/brands/{id:guid}", async (Guid id, ClaimsPrincipal principal
 
 const string statusKeyPattern = "^[a-z0-9][a-z0-9._-]{0,63}$";
 var statusesApi = app.MapGroup("/api/organizations/{organizationId:guid}/statuses").RequireAuthorization();
-var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign"]);
+var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign", "inbox.conversation"]);
 var defaultStatusesByModule = new Dictionary<string, (string Key, string Label, string Color)[]>
 {
     ["crm.lead"] = [("new", "جدید", "#64748b"), ("qualified", "ارزیابی‌شده", "#2563eb"), ("proposal", "پیشنهاد", "#7c3aed"), ("negotiation", "مذاکره", "#d97706"), ("won", "موفق", "#16a34a"), ("lost", "از دست‌رفته", "#dc2626")],
     ["campaign"] = [("draft", "پیش‌نویس", "#64748b"), ("scheduled", "زمان‌بندی‌شده", "#2563eb"), ("active", "فعال", "#16a34a"), ("paused", "متوقف", "#d97706"), ("completed", "پایان‌یافته", "#0f766e"), ("cancelled", "لغوشده", "#dc2626")],
+    ["inbox.conversation"] = [("open", "باز", "#2563eb"), ("pending", "در انتظار پاسخ", "#d97706"), ("resolved", "بسته‌شده", "#16a34a")],
 };
 
 statusesApi.MapGet("/", async (Guid organizationId, string? module, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
@@ -1397,7 +1398,7 @@ contentApi.MapGet("/drafts", async (Guid organizationId, ClaimsPrincipal princip
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var query = db.ContentDrafts.AsNoTracking().Where(x => x.OrganizationId == organizationId);
-    if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(x => x.Status == status);
+    if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(x => x.Status.ToLower() == status.ToLower());
     if (!string.IsNullOrWhiteSpace(q))
     {
         var term = q.Trim();
@@ -1725,7 +1726,7 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
     {
         OrganizationId = organizationId, ChannelConnectionId = request.ChannelConnectionId,
         ContactId = request.ContactId, Subject = subject, ExternalConversationId = externalId,
-        Status = "Open", LastMessageAt = DateTimeOffset.UtcNow
+        Status = "open", LastMessageAt = DateTimeOffset.UtcNow
     };
     db.InboxConversations.Add(item);
     await db.SaveChangesAsync(ct);
@@ -1826,9 +1827,11 @@ inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizati
     if (item is null) return Results.NotFound();
     if (request.Status is not null)
     {
-        if (request.Status is not ("Open" or "Pending" or "Resolved"))
-            return Results.BadRequest(new { error = "وضعیت مکالمه معتبر نیست." });
-        item.Status = request.Status;
+        var nextStatus = request.Status.Trim().ToLowerInvariant();
+        if (!await IsAllowedConfiguredStatus(db, organizationId, "inbox.conversation", nextStatus,
+            new HashSet<string>(["open", "pending", "resolved"]), ct))
+            return Results.BadRequest(new { error = "وضعیت مکالمه معتبر یا فعال نیست." });
+        item.Status = nextStatus;
     }
     if (request.AssignedToUserId.HasValue)
     {
