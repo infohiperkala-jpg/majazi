@@ -25,6 +25,14 @@
 - The first adapter scope is text messaging. Media upload/download, channel-wide broadcasts, and provider-specific advanced controls are not implied by this connection.
 
 
+## WhatsApp Cloud API content publishing
+- Content drafts can be scheduled to a connected WhatsApp Cloud API phone number and a customer phone number in international format (country code, digits only).
+- Text-only drafts use the Cloud API `messages` endpoint. Drafts with one media attachment first upload the file to `/{Phone-Number-ID}/media` as multipart form data (`messaging_product=whatsapp`, `type`, `file`), then send the returned media ID through `/{Phone-Number-ID}/messages`.
+- Image attachments are sent as image messages, MP4 as video messages, and other supported files (including audio) as documents so the draft text can remain a caption.
+- Upload limits enforced by this app: JPEG/PNG images 5 MiB; MP4 video and supported audio 16 MiB; supported documents 25 MiB. WhatsApp media captions are limited to 1,024 characters. OGG audio must use the Opus codec.
+- Free-form text and media publication is subject to Meta's 24-hour customer-service window. Outside that window, Meta requires an approved message template; template-based scheduled publishing is not included in this adapter yet.
+- The integration requires a connected WhatsApp Cloud API channel with a Phone Number ID in the external account ID and a System User access token with the appropriate WhatsApp messaging permission. The Graph API version is configurable through `Meta:GraphApiVersion`.
+
 ## Telegram media publishing
 - Content drafts for Telegram can carry one persisted media/document attachment up to 25 MiB.
 - The publisher uses the official Bot API `sendDocument` multipart upload with `chat_id`, `document`, and `caption`; text-only drafts continue to use `sendMessage`.
