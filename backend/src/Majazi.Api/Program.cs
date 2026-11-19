@@ -987,6 +987,163 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
     return Results.Ok(new { accepted = true });
 });
 
+
+var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
+
+contentApi.MapGet("/ai/status", (IConfiguration config) => Results.Ok(new
+{
+    configured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) &&
+        Uri.TryCreate(config["AI:BaseUrl"], UriKind.Absolute, out _),
+    model = config["AI:Model"] ?? "not-configured",
+    provider = "OpenAI-compatible",
+    keyStored = !string.IsNullOrWhiteSpace(config["AI:ApiKey"])
+}));
+
+contentApi.MapGet("/drafts", async (Guid organizationId, ClaimsPrincipal principal,
+    MajaziDbContext db, string? status, string? q, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var query = db.ContentDrafts.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(x => x.Status == status);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var term = q.Trim();
+        query = query.Where(x => x.Title.Contains(term) || x.Content.Contains(term));
+    }
+    var items = await query.OrderByDescending(x => x.UpdatedAt).Take(100)
+        .Select(x => new { x.Id, x.BrandId, x.Title, x.Content, x.Channel, x.Tone, x.Status, x.AiModel,
+            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, VersionCount = x.Versions.Count })
+        .ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+contentApi.MapPost("/generate", async (Guid organizationId, GenerateContentRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config,
+    IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var topic = request.Topic?.Trim();
+    var channel = string.IsNullOrWhiteSpace(request.Channel) ? "General" : request.Channel.Trim();
+    var tone = string.IsNullOrWhiteSpace(request.Tone) ? "Professional" : request.Tone.Trim();
+    var prompt = request.Instructions?.Trim();
+    if (string.IsNullOrWhiteSpace(topic) || topic.Length > 1500 || channel.Length > 40 ||
+        tone.Length > 40 || (prompt?.Length ?? 0) > 4000)
+        return Results.BadRequest(new { error = "موضوع، لحن، کانال یا دستور تکمیلی معتبر نیست." });
+    var apiKey = config["AI:ApiKey"];
+    var baseUrl = config["AI:BaseUrl"]?.TrimEnd('/');
+    var model = config["AI:Model"];
+    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl) ||
+        !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
+        endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback)
+        return Results.Problem("اتصال هوش مصنوعی پیکربندی نشده است. AI__BaseUrl، AI__ApiKey و AI__Model را در تنظیمات امن سرور تنظیم کنید.", statusCode: 503);
+    if (string.IsNullOrWhiteSpace(model)) return Results.Problem("مدل هوش مصنوعی مشخص نشده است.", statusCode: 503);
+    var brandName = request.BrandId is Guid brandId
+        ? await db.Brands.Where(x => x.Id == brandId && x.OrganizationId == organizationId).Select(x => x.Name).SingleOrDefaultAsync(ct)
+        : null;
+    if (request.BrandId is not null && brandName is null)
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
+    var systemPrompt = "شما استراتژیست ارشد محتوا و کپی‌رایتر فارسی هستید. محتوای دقیق، طبیعی، کاربردی و غیرتکراری بنویسید. ادعای آماری یا factual بدون منبع نسازید. خروجی را فقط به شکل JSON با دو کلید title و content بدهید.";
+    var userPrompt = $"موضوع: {topic}\nکانال انتشار: {channel}\nلحن: {tone}\nبرند: {brandName ?? "عمومی"}\nدستور تکمیلی: {prompt ?? "ندارد"}\nمحتوا را متناسب با کانال و مخاطب فارسی‌زبان تولید کن.";
+    try
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/chat/completions");
+        message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        message.Content = JsonContent.Create(new
+        {
+            model, temperature = 0.7,
+            response_format = new { type = "json_object" },
+            messages = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
+        });
+        using var response = await clients.CreateClient("TelegramBotApi").SendAsync(message, ct);
+        var responseText = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            return Results.Problem("سرویس هوش مصنوعی پاسخ موفق نداد (" + (int)response.StatusCode + "). تنظیمات مدل و اعتبار دسترسی را بررسی کنید.", statusCode: 502);
+        using var document = JsonDocument.Parse(responseText);
+        var generated = document.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        if (string.IsNullOrWhiteSpace(generated)) return Results.Problem("پاسخ مدل خالی بود.", statusCode: 502);
+        using var output = JsonDocument.Parse(generated);
+        var title = output.RootElement.TryGetProperty("title", out var titleElement) ? titleElement.GetString()?.Trim() : null;
+        var content = output.RootElement.TryGetProperty("content", out var contentElement) ? contentElement.GetString()?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(content) || content.Length > 30000)
+            return Results.Problem("ساختار خروجی مدل معتبر نیست.", statusCode: 502);
+        var draft = new ContentDraft
+        {
+            OrganizationId = organizationId, BrandId = request.BrandId, CreatedByUserId = userId.Value,
+            Title = string.IsNullOrWhiteSpace(title) ? topic[..Math.Min(topic.Length, 240)] : title[..Math.Min(title.Length, 240)],
+            Content = content, Channel = channel, Tone = tone, Prompt = userPrompt, AiModel = model
+        };
+        draft.Versions.Add(new ContentDraftVersion
+        {
+            DraftId = draft.Id, VersionNumber = 1, Title = draft.Title, Content = draft.Content,
+            ChangeNote = "نسخه اولیه تولیدشده با هوش مصنوعی", CreatedByUserId = userId.Value
+        });
+        db.ContentDrafts.Add(draft);
+        await db.SaveChangesAsync(ct);
+        return Results.Created($"/api/organizations/{organizationId}/content/drafts/{draft.Id}",
+            new { draft.Id, draft.Title, draft.Content, draft.Channel, draft.Tone, draft.Status, draft.AiModel, draft.CreatedAt, versionCount = 1 });
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+    catch (HttpRequestException) { return Results.Problem("ارتباط با سرویس هوش مصنوعی برقرار نشد.", statusCode: 502); }
+    catch (TaskCanceledException) { return Results.Problem("زمان پاسخ‌گویی هوش مصنوعی به پایان رسید.", statusCode: 504); }
+    catch (JsonException) { return Results.Problem("پاسخ سرویس هوش مصنوعی قابل پردازش نبود.", statusCode: 502); }
+});
+
+contentApi.MapGet("/drafts/{draftId:guid}", async (Guid organizationId, Guid draftId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var draft = await db.ContentDrafts.AsNoTracking()
+        .Where(x => x.Id == draftId && x.OrganizationId == organizationId)
+        .Select(x => new { x.Id, x.BrandId, x.Title, x.Content, x.Channel, x.Tone, x.Status, x.Prompt, x.AiModel,
+            x.CreatedAt, x.UpdatedAt, x.ApprovedAt, Versions = x.Versions.OrderByDescending(v => v.VersionNumber)
+                .Select(v => new { v.Id, v.VersionNumber, v.Title, v.Content, v.ChangeNote, v.CreatedAt }).ToList() })
+        .SingleOrDefaultAsync(ct);
+    return draft is null ? Results.NotFound() : Results.Ok(draft);
+});
+
+contentApi.MapPut("/drafts/{draftId:guid}", async (Guid organizationId, Guid draftId,
+    EditContentDraftRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var draft = await db.ContentDrafts.Include(x => x.Versions)
+        .SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    var title = request.Title?.Trim(); var content = request.Content?.Trim();
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(content) || content.Length > 30000)
+        return Results.BadRequest(new { error = "عنوان و متن محتوا الزامی است و طول آن باید معتبر باشد." });
+    draft.Title = title; draft.Content = content; draft.UpdatedAt = DateTimeOffset.UtcNow;
+    if (draft.Status == "Approved") { draft.Status = "Draft"; draft.ApprovedAt = null; draft.ApprovedByUserId = null; }
+    draft.Versions.Add(new ContentDraftVersion
+    {
+        DraftId = draft.Id, VersionNumber = draft.Versions.Count == 0 ? 1 : draft.Versions.Max(x => x.VersionNumber) + 1,
+        Title = title, Content = content, ChangeNote = string.IsNullOrWhiteSpace(request.ChangeNote) ? "ویرایش محتوا" : request.ChangeNote.Trim()[..Math.Min(request.ChangeNote.Trim().Length, 300)],
+        CreatedByUserId = userId.Value
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { draft.Id, draft.Title, draft.Content, draft.Status, draft.UpdatedAt, versionCount = draft.Versions.Count });
+});
+
+contentApi.MapPost("/drafts/{draftId:guid}/approve", async (Guid organizationId, Guid draftId,
+    ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is null) return Results.NotFound();
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
+    if (draft is null) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(draft.Content)) return Results.Conflict(new { error = "محتوای خالی قابل تأیید نیست." });
+    draft.Status = "Approved"; draft.ApprovedAt = DateTimeOffset.UtcNow; draft.ApprovedByUserId = userId.Value; draft.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { draft.Id, draft.Status, draft.ApprovedAt });
+});
+
 var inboxApi = app.MapGroup("/api/organizations/{organizationId:guid}/inbox").RequireAuthorization();
 
 inboxApi.MapGet("/conversations", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
@@ -1230,3 +1387,6 @@ public sealed record UpdateInboxConversationRequest(string? Status, Guid? Assign
 
 
 record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string DisplayName);
+
+public sealed record GenerateContentRequest(Guid? BrandId, string? Topic, string? Channel, string? Tone, string? Instructions);
+public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
