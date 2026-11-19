@@ -366,6 +366,75 @@ app.MapDelete("/api/brands/{id:guid}", async (Guid id, ClaimsPrincipal principal
 });
 
 
+const string statusKeyPattern = "^[a-z0-9][a-z0-9._-]{0,63}$";
+var statusesApi = app.MapGroup("/api/organizations/{organizationId:guid}/statuses").RequireAuthorization();
+var supportedStatusModules = new HashSet<string>(["crm.lead", "campaign", "inbox.conversation", "content.draft"]);
+
+statusesApi.MapGet("/", async (Guid organizationId, string? module, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var query = db.StatusDefinitions.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(module)) query = query.Where(x => x.Module == module);
+    var items = await query.OrderBy(x => x.Module).ThenBy(x => x.SortOrder).ThenBy(x => x.Label)
+        .Select(x => new { x.Id, x.Module, x.Key, x.Label, x.Color, x.Description, x.SortOrder, x.IsActive, x.CreatedAt, x.UpdatedAt }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+statusesApi.MapPost("/", async (Guid organizationId, StatusDefinitionRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var module = request.Module?.Trim().ToLowerInvariant(); var key = request.Key?.Trim().ToLowerInvariant();
+    var label = request.Label?.Trim(); var color = request.Color?.Trim();
+    if (module is null || !supportedStatusModules.Contains(module) || key is null || !System.Text.RegularExpressions.Regex.IsMatch(key, statusKeyPattern) ||
+        string.IsNullOrWhiteSpace(label) || label.Length > 100 || color is null || !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$") ||
+        (request.Description?.Length ?? 0) > 500 || request.SortOrder < 0 || request.SortOrder > 10000)
+        return Results.BadRequest(new { error = "ماژول، کلید، عنوان، رنگ یا ترتیب وضعیت معتبر نیست." });
+    if (await db.StatusDefinitions.AnyAsync(x => x.OrganizationId == organizationId && x.Module == module && x.Key == key, ct))
+        return Results.Conflict(new { error = "این کلید وضعیت در این ماژول قبلاً ثبت شده است." });
+    var item = new StatusDefinition { OrganizationId = organizationId, Module = module, Key = key, Label = label, Color = color,
+        Description = Clean(request.Description), SortOrder = request.SortOrder, IsActive = request.IsActive };
+    db.StatusDefinitions.Add(item); await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/statuses/{item.Id}", new { item.Id, item.Module, item.Key, item.Label, item.Color, item.Description, item.SortOrder, item.IsActive, item.CreatedAt, item.UpdatedAt });
+});
+
+statusesApi.MapPut("/{statusId:guid}", async (Guid organizationId, Guid statusId, UpdateStatusDefinitionRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.StatusDefinitions.SingleOrDefaultAsync(x => x.Id == statusId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    var label = request.Label?.Trim(); var color = request.Color?.Trim();
+    if (string.IsNullOrWhiteSpace(label) || label.Length > 100 || color is null || !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$") ||
+        (request.Description?.Length ?? 0) > 500 || request.SortOrder < 0 || request.SortOrder > 10000)
+        return Results.BadRequest(new { error = "عنوان، رنگ، توضیح یا ترتیب وضعیت معتبر نیست." });
+    item.Label = label; item.Color = color; item.Description = Clean(request.Description);
+    item.SortOrder = request.SortOrder; item.IsActive = request.IsActive; item.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { item.Id, item.Module, item.Key, item.Label, item.Color, item.Description, item.SortOrder, item.IsActive, item.UpdatedAt });
+});
+
+statusesApi.MapDelete("/{statusId:guid}", async (Guid organizationId, Guid statusId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.StatusDefinitions.SingleOrDefaultAsync(x => x.Id == statusId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    item.IsActive = false; item.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
 var crmApi = app.MapGroup("/api/organizations/{organizationId:guid}/crm").RequireAuthorization();
 
 crmApi.MapGet("/contacts", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, string? q, CancellationToken ct) =>
@@ -1816,6 +1885,8 @@ static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null :
 public sealed record RegisterRequest(string? Email, string? Password, string? OrganizationName, string? CaptchaId, string? CaptchaAnswer);
 public sealed record LoginRequest(string? Email, string? Password, string? CaptchaId, string? CaptchaAnswer);
 public sealed record CreateOrganizationRequest(string? Name, string? Slug);
+public sealed record StatusDefinitionRequest(string? Module, string? Key, string? Label, string? Color, string? Description, int SortOrder, bool IsActive = true);
+public sealed record UpdateStatusDefinitionRequest(string? Label, string? Color, string? Description, int SortOrder, bool IsActive);
 public sealed record CreateBrandRequest(string? Name, string? Slug);
 public sealed record AddMemberRequest(string? Email, string? Role);
 public sealed record CrmContactRequest(Guid? BrandId, string? FullName, string? Email, string? Phone, string? Company, string? Notes);
