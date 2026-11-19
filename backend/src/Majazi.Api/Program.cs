@@ -1197,12 +1197,12 @@ dashboardApi.MapGet("/reports", async (Guid organizationId, DateTimeOffset? from
         .Select(day => new
         {
             date = day.ToString("yyyy-MM-dd"),
-            contacts = contacts.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
-            leads = leads.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
-            activities = activities.Count(x => x.OccurredAt.UtcDateTime.Date == day.UtcDateTime.Date),
-            campaigns = campaigns.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
-            contentDrafts = drafts.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date),
-            messages = messages.Count(x => x.CreatedAt.UtcDateTime.Date == day.UtcDateTime.Date)
+            contacts = contacts.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
+            leads = leads.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
+            activities = activities.Count(x => x.OccurredAt.UtcDateTime.Date == day.Date),
+            campaigns = campaigns.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
+            contentDrafts = drafts.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date),
+            messages = messages.Count(x => x.CreatedAt.UtcDateTime.Date == day.Date)
         }).ToArray();
     return Results.Ok(new
     {
