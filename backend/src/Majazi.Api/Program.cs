@@ -1973,17 +1973,19 @@ growthAgentApi.MapGet("/latest-plan", async (Guid organizationId, ClaimsPrincipa
     return plan is null ? Results.NotFound() : Results.Ok(plan);
 });
 
-growthAgentApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, CancellationToken ct) =>
+growthAgentApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var org = await db.Organizations.AsNoTracking().Where(x => x.Id == organizationId)
         .Select(x => new { x.GrowthAgentEnabled, x.GrowthAgentLastRunAt }).SingleOrDefaultAsync(ct);
     if (org is null) return Results.NotFound();
+    var aiProvider = await ResolveAiProviderConfigAsync(db, protection, config, organizationId, ct);
+    var aiConfigured = aiProvider.Enabled && !string.IsNullOrWhiteSpace(aiProvider.ApiKey) && !string.IsNullOrWhiteSpace(aiProvider.Model) && Uri.TryCreate(aiProvider.BaseUrl, UriKind.Absolute, out var aiEndpoint) && (aiEndpoint.Scheme == Uri.UriSchemeHttps || aiEndpoint.IsLoopback);
     return Results.Ok(new {
         enabled = org.GrowthAgentEnabled,
         lastRunAt = org.GrowthAgentLastRunAt,
-        aiConfigured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) && !string.IsNullOrWhiteSpace(config["AI:Model"]) && Uri.TryCreate(config["AI:BaseUrl"], UriKind.Absolute, out var aiEndpoint) && (aiEndpoint.Scheme == Uri.UriSchemeHttps || aiEndpoint.IsLoopback),
+        aiConfigured,
         cadence = "daily",
         execution = "server-background-worker",
         autoPublishing = false,
