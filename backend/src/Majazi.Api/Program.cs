@@ -569,6 +569,55 @@ campaignsApi.MapPut("/{campaignId:guid}", async (Guid organizationId, Guid campa
     return Results.Ok(new { item.Id, item.BrandId, item.Name, item.Objective, item.Channel, item.Status, item.Budget, item.ActualSpend, item.AttributedRevenue, item.Impressions, item.Clicks, item.Conversions, item.StartsAt, item.EndsAt, item.Notes, item.UpdatedAt });
 });
 
+campaignsApi.MapGet("/report", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var end = to ?? DateTimeOffset.UtcNow;
+    var start = from ?? end.AddDays(-365);
+    if (start >= end || end - start > TimeSpan.FromDays(366))
+        return Results.BadRequest(new { error = "بازه گزارش باید حداکثر ۳۶۶ روز و دارای ترتیب معتبر باشد." });
+
+    var campaigns = await db.MarketingCampaigns.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.CreatedAt >= start && x.CreatedAt < end)
+        .Select(x => new { x.Name, x.Channel, x.Status, x.Budget, x.ActualSpend, x.AttributedRevenue, x.Impressions, x.Clicks, x.Conversions })
+        .ToListAsync(ct);
+
+    var spend = campaigns.Sum(x => x.ActualSpend);
+    var revenue = campaigns.Sum(x => x.AttributedRevenue);
+    var impressions = campaigns.Sum(x => x.Impressions);
+    var clicks = campaigns.Sum(x => x.Clicks);
+    var conversions = campaigns.Sum(x => x.Conversions);
+    return Results.Ok(new
+    {
+        from = start,
+        to = end,
+        campaignCount = campaigns.Count,
+        budget = campaigns.Sum(x => x.Budget),
+        spend,
+        attributedRevenue = revenue,
+        impressions,
+        clicks,
+        conversions,
+        clickThroughRate = impressions == 0 ? 0 : Math.Round((double)clicks * 100 / impressions, 2),
+        conversionRate = clicks == 0 ? 0 : Math.Round((double)conversions * 100 / clicks, 2),
+        returnOnAdSpend = spend == 0 ? 0 : Math.Round((double)(revenue / spend), 2),
+        byChannel = campaigns.GroupBy(x => x.Channel).Select(g => new
+        {
+            channel = g.Key, campaigns = g.Count(), spend = g.Sum(x => x.ActualSpend),
+            revenue = g.Sum(x => x.AttributedRevenue), impressions = g.Sum(x => x.Impressions),
+            clicks = g.Sum(x => x.Clicks), conversions = g.Sum(x => x.Conversions),
+            roas = g.Sum(x => x.ActualSpend) == 0 ? 0 : Math.Round((double)(g.Sum(x => x.AttributedRevenue) / g.Sum(x => x.ActualSpend)), 2)
+        }).OrderByDescending(x => x.spend).ToList(),
+        byStatus = campaigns.GroupBy(x => x.Status).Select(g => new { status = g.Key, count = g.Count() }).OrderByDescending(x => x.count).ToList(),
+        topCampaigns = campaigns.OrderByDescending(x => x.ActualSpend).Take(5).Select(x => new
+        {
+            x.Name, x.Channel, x.ActualSpend, x.AttributedRevenue, x.Clicks, x.Conversions,
+            roas = x.ActualSpend == 0 ? 0 : Math.Round((double)(x.AttributedRevenue / x.ActualSpend), 2)
+        }).ToList()
+    });
+});
+
 campaignsApi.MapDelete("/{campaignId:guid}", async (Guid organizationId, Guid campaignId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
