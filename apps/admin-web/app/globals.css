@@ -124,3 +124,5 @@ body{background:var(--bg);color:var(--ink)}
 .logout-button{border:1px solid #e6d8cb;background:#fff8f1;color:#a75d27;border-radius:8px;padding:8px 13px;font:inherit;font-size:10px;cursor:pointer}
 @media(max-width:900px){.auth-premium{grid-template-columns:1fr}.auth-showcase{display:none}.auth-panel{min-height:100vh;padding:24px}.auth-panel .auth-card{max-width:440px}}
 @media(max-width:520px){.auth-panel{padding:24px 18px}.auth-panel .auth-card h1{font-size:24px}}
+
+.topbar-work-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.topbar-work-actions a{display:inline-flex;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:#4c4b8e;text-decoration:none;font-size:10px;font-weight:700}.topbar-work-actions a:nth-child(2){background:#6558d3;color:#fff;border-color:#6558d3}.topbar-work-actions a:nth-child(3){background:#f0efff;border-color:#d9d5ff}@media(max-width:900px){.topbar{align-items:flex-start;gap:12px;flex-wrap:wrap}.topbar-work-actions{order:3;width:100%}.topbar-work-actions a{flex:1;justify-content:center}}
