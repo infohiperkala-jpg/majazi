@@ -1621,10 +1621,13 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
     var receivedAt = DateTimeOffset.UtcNow;
     if (telegramMessage.TryGetProperty("date", out var dateElement) && dateElement.TryGetInt64(out var unixSeconds))
         receivedAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
-    db.InboxMessages.Add(new InboxMessage {
+    var inboxMessage = new InboxMessage {
         ConversationId = conversation.Id, ExternalMessageId = externalMessageId,
         Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt
-    });
+    };
+    db.InboxMessages.Add(inboxMessage);
+    await QueueAutomationRunsAsync(db, channel.OrganizationId, "InboxMessageReceived", "InboxMessage", inboxMessage.Id,
+        new { messageBody = body, conversationSubject = conversation.Subject, channel = channel.Provider }, ct);
     conversation.LastMessageAt = receivedAt;
     conversation.UpdatedAt = DateTimeOffset.UtcNow;
     if (conversation.Status.Equals("resolved", StringComparison.OrdinalIgnoreCase)) conversation.Status = "open";
@@ -2130,8 +2133,8 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
     var conditionOperator = request.ConditionOperator?.Trim() ?? "Equals";
     var actionType = request.ActionType?.Trim(); var actionValue = request.ActionValue?.Trim();
     if (string.IsNullOrWhiteSpace(name) || name.Length > 120 ||
-        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged" or "ContentApproved") ||
-        conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany" or "ContentChannel" or "ContentTitle") ||
+        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged" or "ContentApproved" or "InboxMessageReceived") ||
+        conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany" or "ContentChannel" or "ContentTitle" or "MessageBody") ||
         conditionOperator is not ("Equals" or "Contains") ||
         actionType is not ("CreateActivity" or "UpdateLeadStage") ||
         string.IsNullOrWhiteSpace(actionValue) || actionValue.Length > 1000 ||
@@ -2139,7 +2142,9 @@ automationApi.MapPost("/rules", async (Guid organizationId, AutomationRuleReques
         (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
         ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
         (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
-        (actionType == "UpdateLeadStage" && (trigger == "ContactCreated" || trigger == "ContentApproved")) ||
+        (conditionField == "MessageBody" && trigger != "InboxMessageReceived") ||
+        (trigger == "InboxMessageReceived" && conditionField is not ("Any" or "MessageBody")) ||
+        (actionType == "UpdateLeadStage" && (trigger == "ContactCreated" || trigger == "ContentApproved" || trigger == "InboxMessageReceived")) ||
         (trigger == "ContentApproved" && conditionField is not ("Any" or "ContentChannel" or "ContentTitle")) ||
         (trigger != "ContentApproved" && (conditionField is "ContentChannel" or "ContentTitle")) ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
@@ -2178,8 +2183,8 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
     var conditionOperator = request.ConditionOperator?.Trim() ?? "Equals";
     var actionType = request.ActionType?.Trim(); var actionValue = request.ActionValue?.Trim();
     if (string.IsNullOrWhiteSpace(name) || name.Length > 120 ||
-        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged" or "ContentApproved") ||
-        conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany" or "ContentChannel" or "ContentTitle") ||
+        trigger is not ("ContactCreated" or "LeadCreated" or "LeadStageChanged" or "ContentApproved" or "InboxMessageReceived") ||
+        conditionField is not ("Any" or "LeadStage" or "LeadSource" or "ContactCompany" or "ContentChannel" or "ContentTitle" or "MessageBody") ||
         conditionOperator is not ("Equals" or "Contains") ||
         actionType is not ("CreateActivity" or "UpdateLeadStage") ||
         string.IsNullOrWhiteSpace(actionValue) || actionValue.Length > 1000 ||
@@ -2187,7 +2192,9 @@ automationApi.MapPut("/rules/{ruleId:guid}", async (Guid organizationId, Guid ru
         (conditionField != "Any" && string.IsNullOrWhiteSpace(request.ConditionValue)) ||
         ((conditionField is "LeadStage" or "LeadSource") && trigger == "ContactCreated") ||
         (conditionField == "ContactCompany" && trigger != "ContactCreated") ||
-        (actionType == "UpdateLeadStage" && (trigger == "ContactCreated" || trigger == "ContentApproved")) ||
+        (conditionField == "MessageBody" && trigger != "InboxMessageReceived") ||
+        (trigger == "InboxMessageReceived" && conditionField is not ("Any" or "MessageBody")) ||
+        (actionType == "UpdateLeadStage" && (trigger == "ContactCreated" || trigger == "ContentApproved" || trigger == "InboxMessageReceived")) ||
         (trigger == "ContentApproved" && conditionField is not ("Any" or "ContentChannel" or "ContentTitle")) ||
         (trigger != "ContentApproved" && (conditionField is "ContentChannel" or "ContentTitle")) ||
         (actionType == "CreateActivity" && request.ActivityType is not ("Note" or "Call" or "Email" or "Meeting" or "Task")))
