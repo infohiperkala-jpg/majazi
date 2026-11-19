@@ -746,6 +746,51 @@ channelsApi.MapPost("/", async (SocialChannelRequest request, Guid organizationI
         new { item.Id, item.BrandId, item.Provider, item.DisplayName, item.ExternalAccountId, item.Status,
             HasCredential = item.EncryptedAccessToken != null, item.CreatedAt });
 });
+channelsApi.MapPost("/{connectionId:guid}/webhook", async (Guid organizationId, Guid connectionId,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection, IHttpClientFactory clients,
+    CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var role = await db.OrganizationMemberships.Where(x => x.UserId == userId && x.OrganizationId == organizationId)
+        .Select(x => x.Role).SingleOrDefaultAsync(ct);
+    if (role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
+        x => x.Id == connectionId && x.OrganizationId == organizationId && x.Provider == "Telegram", ct);
+    if (item is null) return Results.NotFound();
+    if (item.Status != "Connected") return Results.Conflict(new { error = "ابتدا اتصال ربات را تأیید کنید." });
+    var publicBaseUrl = config["PublicBaseUrl"]?.TrimEnd('/');
+    if (!Uri.TryCreate(publicBaseUrl, UriKind.Absolute, out var baseUri) ||
+        (baseUri.Scheme != Uri.UriSchemeHttps && !baseUri.IsLoopback))
+        return Results.BadRequest(new { error = "PublicBaseUrl باید آدرس عمومی HTTPS سامانه باشد." });
+    var signature = TelegramWebhookSignature(config["Jwt:SigningKey"]!, connectionId);
+    var secret = TelegramWebhookSecret(config["Jwt:SigningKey"]!, connectionId);
+    var webhookUrl = $"{publicBaseUrl}/api/webhooks/telegram/{connectionId:D}/{signature}";
+    string botToken;
+    try { botToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(item.EncryptedAccessToken!); }
+    catch { return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اتصال را دوباره برقرار کنید." }); }
+    try
+    {
+        using var response = await clients.CreateClient("TelegramBotApi").PostAsJsonAsync(
+            $"https://api.telegram.org/bot{botToken}/setWebhook",
+            new { url = webhookUrl, secret_token = secret, allowed_updates = new[] { "message", "edited_message" }, drop_pending_updates = false }, ct);
+        using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        if (!response.IsSuccessStatusCode || !payload.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+            return Results.Problem("تلگرام وب‌هوک را ثبت نکرد؛ تنظیمات دامنه و دسترسی سرور را بررسی کنید.", statusCode: 502);
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { configured = true, webhookUrl, provider = "Telegram" });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    {
+        return Results.Problem("ثبت وب‌هوک تلگرام به پایان زمان مجاز رسید.", statusCode: 504);
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem("ارتباط با Telegram Bot API برقرار نشد.", statusCode: 502);
+    }
+});
+
 channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, Guid connectionId,
     ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection,
     IHttpClientFactory httpClientFactory, CancellationToken ct) =>
@@ -877,6 +922,70 @@ dashboardApi.MapGet("/summary", async (Guid organizationId, ClaimsPrincipal prin
     });
 });
 
+
+app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Guid connectionId, string signature,
+    HttpRequest request, MajaziDbContext db, IDataProtectionProvider protection, IConfiguration config, CancellationToken ct) =>
+{
+    var signingKey = config["Jwt:SigningKey"]!;
+    var expectedSignature = TelegramWebhookSignature(signingKey, connectionId);
+    var expectedSecret = TelegramWebhookSecret(signingKey, connectionId);
+    var suppliedSecret = request.Headers["X-Telegram-Bot-Api-Secret-Token"].ToString();
+    if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(signature), Encoding.UTF8.GetBytes(expectedSignature)) ||
+        !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(suppliedSecret), Encoding.UTF8.GetBytes(expectedSecret)))
+        return Results.Unauthorized();
+
+    using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+    var root = document.RootElement;
+    JsonElement telegramMessage;
+    if (!root.TryGetProperty("message", out telegramMessage) && !root.TryGetProperty("edited_message", out telegramMessage))
+        return Results.Ok(new { accepted = true, ignored = true });
+    if (!telegramMessage.TryGetProperty("chat", out var chat) || !chat.TryGetProperty("id", out var chatIdElement) ||
+        !chatIdElement.TryGetInt64(out var chatId) || !telegramMessage.TryGetProperty("message_id", out var messageIdElement))
+        return Results.BadRequest();
+    var externalMessageId = messageIdElement.ToString();
+    var body = telegramMessage.TryGetProperty("text", out var textElement) ? textElement.GetString() :
+        telegramMessage.TryGetProperty("caption", out var captionElement) ? captionElement.GetString() : null;
+    if (string.IsNullOrWhiteSpace(body)) return Results.Ok(new { accepted = true, ignored = true });
+    if (body.Length > 10000) body = body[..10000];
+
+    var channel = await db.SocialChannelConnections.SingleOrDefaultAsync(
+        x => x.Id == connectionId && x.Provider == "Telegram" && x.Status == "Connected", ct);
+    if (channel is null) return Results.NotFound();
+    var externalChatId = chatId.ToString();
+    var conversation = await db.InboxConversations.SingleOrDefaultAsync(
+        x => x.ChannelConnectionId == connectionId && x.ExternalConversationId == externalChatId, ct);
+    if (conversation is null)
+    {
+        var senderName = telegramMessage.TryGetProperty("from", out var from)
+            ? string.Join(" ", new[] {
+                from.TryGetProperty("first_name", out var first) ? first.GetString() : null,
+                from.TryGetProperty("last_name", out var last) ? last.GetString() : null
+              }.Where(x => !string.IsNullOrWhiteSpace(x)))
+            : null;
+        conversation = new InboxConversation {
+            OrganizationId = channel.OrganizationId, ChannelConnectionId = channel.Id,
+            ExternalConversationId = externalChatId, Subject = string.IsNullOrWhiteSpace(senderName) ? $"Telegram {externalChatId}" : senderName,
+            Status = "Open"
+        };
+        db.InboxConversations.Add(conversation);
+        await db.SaveChangesAsync(ct);
+    }
+    var duplicate = await db.InboxMessages.AnyAsync(
+        x => x.ConversationId == conversation.Id && x.ExternalMessageId == externalMessageId, ct);
+    if (duplicate) return Results.Ok(new { accepted = true, duplicate = true });
+    var receivedAt = DateTimeOffset.UtcNow;
+    if (telegramMessage.TryGetProperty("date", out var dateElement) && dateElement.TryGetInt64(out var unixSeconds))
+        receivedAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+    db.InboxMessages.Add(new InboxMessage {
+        ConversationId = conversation.Id, ExternalMessageId = externalMessageId,
+        Direction = "Inbound", Body = body, Status = "Received", CreatedAt = receivedAt
+    });
+    conversation.LastMessageAt = receivedAt;
+    conversation.UpdatedAt = DateTimeOffset.UtcNow;
+    if (conversation.Status == "Resolved") conversation.Status = "Open";
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { accepted = true });
+});
 
 var inboxApi = app.MapGroup("/api/organizations/{organizationId:guid}/inbox").RequireAuthorization();
 
@@ -1090,6 +1199,14 @@ static object IssueToken(AppUser user, IConfiguration config)
     var token = new JwtSecurityToken(issuer, audience, claims, expires: expires, signingCredentials: credentials);
     return new { accessToken = new JwtSecurityTokenHandler().WriteToken(token), tokenType = "Bearer", expiresAt = expires };
 }
+
+static string TelegramWebhookSignature(string signingKey, Guid connectionId) =>
+    Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),
+        Encoding.UTF8.GetBytes("majazi:telegram:path:" + connectionId.ToString("D")))).ToLowerInvariant();
+
+static string TelegramWebhookSecret(string signingKey, Guid connectionId) =>
+    Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),
+        Encoding.UTF8.GetBytes("majazi:telegram:secret:" + connectionId.ToString("D")))).ToLowerInvariant();
 
 static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
