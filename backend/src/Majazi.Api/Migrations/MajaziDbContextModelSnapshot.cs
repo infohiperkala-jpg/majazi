@@ -129,20 +129,6 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.ToTable("content_draft_versions", (string)null);
         });
 
-        modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
-        {
-            b.HasOne("Majazi.Api.Models.SocialChannelConnection", "ChannelConnection").WithMany().HasForeignKey("ChannelConnectionId").OnDelete(DeleteBehavior.SetNull);
-            b.HasOne("Majazi.Api.Models.CrmContact", "Contact").WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
-            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
-            b.Navigation("ChannelConnection"); b.Navigation("Contact"); b.Navigation("Organization"); b.Navigation("Messages");
-        });
-
-        modelBuilder.Entity("Majazi.Api.Models.InboxMessage", b =>
-        {
-            b.HasOne("Majazi.Api.Models.InboxConversation", "Conversation").WithMany("Messages").HasForeignKey("ConversationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
-            b.Navigation("Conversation");
-        });
-
         modelBuilder.Entity("Majazi.Api.Models.Brand", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");
@@ -311,6 +297,23 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
         modelBuilder.Entity("Majazi.Api.Models.ContentDraft", b =>
         {
             b.Navigation("Versions");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxConversation", b =>
+        {
+            b.HasOne("Majazi.Api.Models.SocialChannelConnection", "ChannelConnection").WithMany().HasForeignKey("ChannelConnectionId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.CrmContact", "Contact").WithMany().HasForeignKey("ContactId").OnDelete(DeleteBehavior.SetNull);
+            b.HasOne("Majazi.Api.Models.Organization", "Organization").WithMany().HasForeignKey("OrganizationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("ChannelConnection");
+            b.Navigation("Contact");
+            b.Navigation("Organization");
+            b.Navigation("Messages");
+        });
+
+        modelBuilder.Entity("Majazi.Api.Models.InboxMessage", b =>
+        {
+            b.HasOne("Majazi.Api.Models.InboxConversation", "Conversation").WithMany("Messages").HasForeignKey("ConversationId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+            b.Navigation("Conversation");
         });
 
         modelBuilder.Entity("Majazi.Api.Models.CrmContact", b =>
