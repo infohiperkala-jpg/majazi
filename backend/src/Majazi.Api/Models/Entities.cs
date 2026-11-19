@@ -281,3 +281,38 @@ public sealed class AutomationRun
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
 }
+
+
+public sealed class KnowledgeArticle
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public required string Title { get; set; }
+    public required string Slug { get; set; }
+    public string? Summary { get; set; }
+    public required string Body { get; set; }
+    public string Category { get; set; } = "عمومی";
+    public string Tags { get; set; } = "";
+    public string Status { get; set; } = "Draft";
+    public int Version { get; set; } = 1;
+    public Guid CreatedByUserId { get; set; }
+    public Guid UpdatedByUserId { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class KnowledgeArticleRevision
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ArticleId { get; set; }
+    public int Version { get; set; }
+    public required string Title { get; set; }
+    public required string Summary { get; set; }
+    public required string Body { get; set; }
+    public required string Category { get; set; }
+    public required string Tags { get; set; }
+    public string? ChangeNote { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
