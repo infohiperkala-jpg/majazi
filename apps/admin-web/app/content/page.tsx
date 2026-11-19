@@ -16,7 +16,7 @@ async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
  if(!response.ok)throw new Error(data?.error??data?.detail??"درخواست ناموفق بود.");
  return data as T;
 }
-const statuses:Record<string,string>={Draft:"پیش‌نویس",Approved:"تأییدشده",Published:"منتشرشده"};
+const statuses:Record<string,string>={Draft:"پیش‌نویس",Approved:"تأییدشده",Scheduled:"زمان‌بندی‌شده",Publishing:"در حال انتشار",Published:"منتشرشده",PublishFailed:"خطای انتشار"};
 export default function ContentStudioPage(){
  const [token,setToken]=useState("");const [orgs,setOrgs]=useState<Organization[]>([]);const [org,setOrg]=useState("");
  const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [selected,setSelected]=useState("");
