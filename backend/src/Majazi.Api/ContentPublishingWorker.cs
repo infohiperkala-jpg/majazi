@@ -64,24 +64,52 @@ public sealed class ContentPublishingWorker(
                     throw new InvalidOperationException("مقصد انتشار یا اتصال کانال مشخص نشده است.");
                 var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
                     x.Id == draft.PublishConnectionId && x.OrganizationId == draft.OrganizationId &&
-                    x.Provider == "Telegram" && x.Status == "Connected", ct);
+                    (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected", ct);
                 if (connection?.EncryptedAccessToken is null)
-                    throw new InvalidOperationException("اتصال تلگرام دیگر فعال نیست.");
-                if (draft.Content.Length > 4096)
+                    throw new InvalidOperationException("اتصال پیام‌رسان انتخاب‌شده دیگر فعال نیست.");
+                if (connection.Provider == "Telegram" && draft.Content.Length > 4096)
                     throw new InvalidOperationException("متن بیش از محدودیت ۴۰۹۶ نویسه تلگرام است؛ محتوا را کوتاه کنید.");
+                if (draft.Channel != connection.Provider)
+                    throw new InvalidOperationException("پلتفرم پیش‌نویس با اتصال انتشار یکسان نیست.");
 
                 var protection = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();
                 var protector = protection.CreateProtector("Majazi.SocialConnections.v1");
                 var token = protector.Unprotect(connection.EncryptedAccessToken);
-                using var response = await httpClientFactory.CreateClient("TelegramBotApi")
-                    .PostAsJsonAsync($"https://api.telegram.org/bot{token}/sendMessage",
-                        new { chat_id = draft.PublishTarget, text = draft.Content, disable_web_page_preview = false }, ct);
-                var payload = await response.Content.ReadAsStringAsync(ct);
-                if (!response.IsSuccessStatusCode)
-                    throw new InvalidOperationException("Telegram API returned HTTP " + (int)response.StatusCode + ".");
-                using var json = JsonDocument.Parse(payload);
-                if (!json.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
-                    throw new InvalidOperationException("Telegram did not accept the publication.");
+                if (connection.Provider == "Telegram")
+                {
+                    using var response = await httpClientFactory.CreateClient("TelegramBotApi")
+                        .PostAsJsonAsync($"https://api.telegram.org/bot{token}/sendMessage",
+                            new { chat_id = draft.PublishTarget, text = draft.Content, disable_web_page_preview = false }, ct);
+                    var payload = await response.Content.ReadAsStringAsync(ct);
+                    if (!response.IsSuccessStatusCode)
+                        throw new InvalidOperationException("Telegram API returned HTTP " + (int)response.StatusCode + ".");
+                    using var json = JsonDocument.Parse(payload);
+                    if (!json.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
+                        throw new InvalidOperationException("Telegram did not accept the publication.");
+                }
+                else
+                {
+                    try
+                    {
+                        var endpoint = $"https://eitaayar.ir/api/{Uri.EscapeDataString(token)}/sendMessage";
+                        using var response = await httpClientFactory.CreateClient("EitaaYar").PostAsync(endpoint,
+                            new FormUrlEncodedContent(new Dictionary<string, string>
+                            {
+                                ["chat_id"] = draft.PublishTarget!,
+                                ["text"] = draft.Content
+                            }), ct);
+                        if (!response.IsSuccessStatusCode)
+                            throw new InvalidOperationException("EitaaYar returned HTTP " + (int)response.StatusCode + ".");
+                        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                        if (!json.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+                            throw new InvalidOperationException("EitaaYar did not accept the publication.");
+                    }
+                    catch (HttpRequestException)
+                    {
+                        // Avoid persisting an exception that may include the credential-bearing request URI.
+                        throw new InvalidOperationException("ارتباط با API ایتایار برقرار نشد؛ مسیر شبکه و سرویس مقصد را بررسی کنید.");
+                    }
+                }
 
                 draft.Status = "Published";
                 draft.PublishedAt = DateTimeOffset.UtcNow;
