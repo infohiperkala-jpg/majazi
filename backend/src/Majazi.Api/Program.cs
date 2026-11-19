@@ -1622,9 +1622,7 @@ aiApi.MapGet("/settings", async (Guid organizationId, ClaimsPrincipal principal,
         .SingleOrDefaultAsync(x => x.OrganizationId == organizationId, ct);
     var baseUrl = saved?.BaseUrl ?? config["AI:BaseUrl"];
     var model = saved?.Model ?? config["AI:Model"];
-    var keyConfigured = saved is null
-        ? !string.IsNullOrWhiteSpace(config["AI:ApiKey"])
-        : !string.IsNullOrWhiteSpace(saved.EncryptedApiKey);
+    var keyConfigured = !string.IsNullOrWhiteSpace(saved?.EncryptedApiKey) || !string.IsNullOrWhiteSpace(config["AI:ApiKey"]);
     return Results.Ok(new
     {
         baseUrl, model, keyConfigured, isEnabled = saved?.IsEnabled ?? true,
@@ -2870,11 +2868,11 @@ static async Task<AiProviderConfig> ResolveAiProviderConfigAsync(MajaziDbContext
         .SingleOrDefaultAsync(x => x.OrganizationId == organizationId, ct);
     if (saved is null)
         return new AiProviderConfig(config["AI:ApiKey"], config["AI:BaseUrl"], config["AI:Model"], true, false);
-    string? key = null;
+    string? key = config["AI:ApiKey"];
     if (!string.IsNullOrWhiteSpace(saved.EncryptedApiKey))
     {
         try { key = protection.CreateProtector("Majazi.AIProviderSettings.v1", organizationId.ToString("N")).Unprotect(saved.EncryptedApiKey); }
-        catch (CryptographicException) { key = null; }
+        catch (CryptographicException) { key = config["AI:ApiKey"]; }
     }
     return new AiProviderConfig(key, saved.BaseUrl, saved.Model, saved.IsEnabled, true);
 }
