@@ -25,6 +25,12 @@
 - The first adapter scope is text messaging. Media upload/download, channel-wide broadcasts, and provider-specific advanced controls are not implied by this connection.
 
 
+## Eitaa publishing through EitaaYar
+- Register an EitaaYar API token (not an assumed native Eitaa bot token) as the channel credential. The adapter validates it with `getMe` and publishes approved text drafts using `sendMessage` at `https://eitaayar.ir/api/{TOKEN}/{METHOD}`.
+- Publishing uses `application/x-www-form-urlencoded` with `chat_id` and `text`. The destination may be a numeric chat/channel ID or a supported username. The destination must already be available to the EitaaYar account and authorized for delivery.
+- EitaaYar credentials are encrypted at rest. The token is embedded in the provider URL by the documented API; do not enable request-URI logging for this client.
+- This integration is outbound-only. No inbound webhook or Eitaa inbox sync is claimed. File/media sending is not enabled until its upload contract is verified.
+
 ## Instagram Messaging and Facebook Messenger
 - Instagram Business Login requests `instagram_business_manage_messages` in addition to the existing account/content scopes. The account must be eligible for Instagram Messaging and the Meta app must have the required access/review for production users.
 - Facebook Messenger is connected by registering the Facebook Page ID and its Page Access Token with `pages_messaging` permission. Use a Page token for a Page where the app has messaging task access; do not use a user token.
