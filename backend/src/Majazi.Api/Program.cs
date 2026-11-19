@@ -2897,6 +2897,11 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var scheduleTemplateError = ValidateWhatsAppTemplate(request.WhatsAppTemplateName, request.WhatsAppTemplateLanguage, request.WhatsAppTemplateParameters,
         connection.Provider == "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct));
     if (scheduleTemplateError is not null) return Results.BadRequest(new { error = scheduleTemplateError });
+    var componentsError = ValidateWhatsAppTemplateComponents(request.WhatsAppTemplateComponentsJson);
+    if (componentsError is not null) return Results.BadRequest(new { error = componentsError });
+    if (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateComponentsJson) && string.IsNullOrWhiteSpace(request.WhatsAppTemplateName))
+        return Results.BadRequest(new { error = "برای اجزای پیشرفته، نام قالب واتساپ الزامی است." });
+
     if (connection.Provider != "WhatsApp" && (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ||
         !string.IsNullOrWhiteSpace(request.WhatsAppTemplateLanguage) || request.WhatsAppTemplateParameters is { Length: > 0 }))
         return Results.BadRequest(new { error = "قالب تأییدشده فقط برای کانال واتساپ قابل استفاده است." });
@@ -2904,6 +2909,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     draft.WhatsAppTemplateLanguage = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateLanguage) ?? "en_US";
     draft.WhatsAppTemplateParametersJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null :
         JsonSerializer.Serialize(request.WhatsAppTemplateParameters ?? Array.Empty<string>());
+    draft.WhatsAppTemplateComponentsJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateComponentsJson);
     draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
     draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2940,6 +2946,11 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     var publishTemplateError = ValidateWhatsAppTemplate(request.WhatsAppTemplateName, request.WhatsAppTemplateLanguage, request.WhatsAppTemplateParameters,
         connection.Provider == "WhatsApp" && await db.ContentDraftAttachments.AnyAsync(x => x.DraftId == draft.Id, ct));
     if (publishTemplateError is not null) return Results.BadRequest(new { error = publishTemplateError });
+    var componentsError = ValidateWhatsAppTemplateComponents(request.WhatsAppTemplateComponentsJson);
+    if (componentsError is not null) return Results.BadRequest(new { error = componentsError });
+    if (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateComponentsJson) && string.IsNullOrWhiteSpace(request.WhatsAppTemplateName))
+        return Results.BadRequest(new { error = "برای اجزای پیشرفته، نام قالب واتساپ الزامی است." });
+
     if (connection.Provider != "WhatsApp" && (!string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ||
         !string.IsNullOrWhiteSpace(request.WhatsAppTemplateLanguage) || request.WhatsAppTemplateParameters is { Length: > 0 }))
         return Results.BadRequest(new { error = "قالب تأییدشده فقط برای کانال واتساپ قابل استفاده است." });
@@ -2947,6 +2958,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     draft.WhatsAppTemplateLanguage = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateLanguage) ?? "en_US";
     draft.WhatsAppTemplateParametersJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null :
         JsonSerializer.Serialize(request.WhatsAppTemplateParameters ?? Array.Empty<string>());
+    draft.WhatsAppTemplateComponentsJson = string.IsNullOrWhiteSpace(request.WhatsAppTemplateName) ? null : Clean(request.WhatsAppTemplateComponentsJson);
     draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
     draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2965,7 +2977,7 @@ contentApi.MapPost("/drafts/{draftId:guid}/cancel-schedule", async (Guid organiz
     if (draft is null) return Results.NotFound();
     if (draft.Status != "Scheduled") return Results.Conflict(new { error = "این محتوا در صف زمان‌بندی نیست." });
     draft.Status = "Approved"; draft.ScheduledAt = null; draft.PublishConnectionId = null; draft.PublishTarget = null;
-    draft.WhatsAppTemplateName = null; draft.WhatsAppTemplateLanguage = null; draft.WhatsAppTemplateParametersJson = null;
+    draft.WhatsAppTemplateName = null; draft.WhatsAppTemplateLanguage = null; draft.WhatsAppTemplateParametersJson = null; draft.WhatsAppTemplateComponentsJson = null;
     draft.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { draft.Id, draft.Status });
@@ -3965,6 +3977,32 @@ static string? ValidateWhatsAppTemplate(string? name, string? language, string[]
     return null;
 }
 
+static string? ValidateWhatsAppTemplateComponents(string? componentsJson)
+{
+    if (string.IsNullOrWhiteSpace(componentsJson)) return null;
+    if (componentsJson.Length > 12000) return "حجم اجزای قالب واتساپ بیش از حد مجاز است.";
+    try
+    {
+        using var document = JsonDocument.Parse(componentsJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() > 10)
+            return "اجزای قالب باید آرایه JSON با حداکثر ۱۰ جزء باشند.";
+        foreach (var component in document.RootElement.EnumerateArray())
+        {
+            if (component.ValueKind != JsonValueKind.Object ||
+                !component.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() is not ("header" or "body" or "button"))
+                return "هر جزء قالب باید از نوع header، body یا button باشد.";
+            if (component.TryGetProperty("parameters", out var parameters) &&
+                (parameters.ValueKind != JsonValueKind.Array || parameters.GetArrayLength() > 20))
+                return "پارامترهای هر جزء باید آرایه‌ای با حداکثر ۲۰ مقدار باشند.";
+            if (component.TryGetProperty("index", out var index) && index.ValueKind is not (JsonValueKind.String or JsonValueKind.Number))
+                return "index دکمه قالب معتبر نیست.";
+        }
+        return null;
+    }
+    catch (JsonException) { return "ساختار JSON اجزای قالب معتبر نیست."; }
+}
+
 static string TelegramWebhookSecret(string signingKey, Guid connectionId) =>
     Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),
         Encoding.UTF8.GetBytes("majazi:telegram:secret:" + connectionId.ToString("D")))).ToLowerInvariant();
@@ -4003,9 +4041,9 @@ public sealed record UpdateTextTemplateRequest(string? Name, string? Content, in
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
 
 public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt,
-    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null);
+    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null, string? WhatsAppTemplateComponentsJson = null);
 public sealed record PublishNowRequest(Guid ConnectionId, string? TargetChatId,
-    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null);
+    string? WhatsAppTemplateName = null, string? WhatsAppTemplateLanguage = null, string[]? WhatsAppTemplateParameters = null, string? WhatsAppTemplateComponentsJson = null);
 
 
 public sealed record ContentApprovalRequest(string? Comment);
