@@ -191,6 +191,9 @@ public sealed class ContentDraft
     public Guid? PublishConnectionId { get; set; }
     public string? PublishTarget { get; set; }
     public string? PublishError { get; set; }
+    public string? WhatsAppTemplateName { get; set; }
+    public string? WhatsAppTemplateLanguage { get; set; }
+    public string? WhatsAppTemplateComponents { get; set; }
     public ICollection<ContentDraftVersion> Versions { get; set; } = new List<ContentDraftVersion>();
 }
 
