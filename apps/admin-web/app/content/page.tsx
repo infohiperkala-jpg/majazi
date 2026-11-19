@@ -12,6 +12,7 @@ type Approval={id:string;reviewRound:number;stageNumber:number;decision:string;c
 type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
 type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
 type CalendarItem={id:string;title:string;channel:string;status:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null};
+type TextTemplate={id:string;module:string;field:string;name:string;content:string;isActive:boolean;sortOrder:number};
 async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
  const response=await fetch("/backend-api"+path,{...init,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token,...init?.headers},cache:"no-store"});
  const data=await response.json().catch(()=>null);
@@ -21,7 +22,7 @@ async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
 const statuses:Record<string,string>={Draft:"پیش‌نویس",InReview:"در انتظار تأیید دوم",Approved:"تأییدشده",Scheduled:"زمان‌بندی‌شده",Publishing:"در حال انتشار",Published:"منتشرشده",PublishFailed:"خطای انتشار"};
 export default function ContentStudioPage(){
  const [token,setToken]=useState("");const [orgs,setOrgs]=useState<Organization[]>([]);const [org,setOrg]=useState("");
- const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [calendarItems,setCalendarItems]=useState<CalendarItem[]>([]);const [selected,setSelected]=useState("");
+ const [brands,setBrands]=useState<Brand[]>([]);const [items,setItems]=useState<Draft[]>([]);const [textTemplates,setTextTemplates]=useState<TextTemplate[]>([]);const [calendarItems,setCalendarItems]=useState<CalendarItem[]>([]);const [selected,setSelected]=useState("");
  const [detail,setDetail]=useState<Draft|null>(null);const [approvals,setApprovals]=useState<Approval[]>([]);const [approvalComment,setApprovalComment]=useState("");const [ai,setAi]=useState<AIStatus|null>(null);const [targets,setTargets]=useState<PublishTarget[]>([]);const [connectionId,setConnectionId]=useState("");const [targetChatId,setTargetChatId]=useState("");const [scheduledAt,setScheduledAt]=useState("");
  const [topic,setTopic]=useState("");const [manualTitle,setManualTitle]=useState("");const [manualContent,setManualContent]=useState("");const [createMode,setCreateMode]=useState<"ai"|"manual">("ai");const [brandId,setBrandId]=useState("");const [channel,setChannel]=useState("Instagram");const [tone,setTone]=useState("حرفه‌ای و متقاعدکننده");const [instructions,setInstructions]=useState("");
  const [title,setTitle]=useState("");const [content,setContent]=useState("");const [filter,setFilter]=useState("All");const [query,setQuery]=useState("");
@@ -29,14 +30,15 @@ export default function ContentStudioPage(){
  const base="/api/organizations/"+org+"/content";
  async function refresh(access=token,organization=org){
   if(!access||!organization)return;
-  const [drafts,aiStatus,brandList,publishTargets,calendar]=await Promise.all([
+  const [drafts,aiStatus,brandList,publishTargets,calendar,templates]=await Promise.all([
    api<Draft[]>("/api/organizations/"+organization+"/content/drafts?status="+filter+"&q="+encodeURIComponent(query),access),
    api<AIStatus>("/api/organizations/"+organization+"/content/ai/status",access),
    api<Brand[]>("/api/organizations/"+organization+"/brands",access),
    api<PublishTarget[]>("/api/organizations/"+organization+"/content/publish-targets",access),
-   api<{items:CalendarItem[]}>("/api/organizations/"+organization+"/content/calendar",access)
+   api<{items:CalendarItem[]}>("/api/organizations/"+organization+"/content/calendar",access),
+   api<TextTemplate[]>("/api/organizations/"+organization+"/text-templates?module=content",access)
   ]);
-  setItems(drafts);setAi(aiStatus);setBrands(brandList);setTargets(publishTargets);setCalendarItems(calendar.items);if(!connectionId&&publishTargets.length)setConnectionId(publishTargets[0].id);
+  setItems(drafts);setAi(aiStatus);setBrands(brandList);setTargets(publishTargets);setCalendarItems(calendar.items);setTextTemplates(templates.filter(x=>x.isActive));if(!connectionId&&publishTargets.length)setConnectionId(publishTargets[0].id);
   if(selected&&!drafts.some(x=>x.id===selected)){setSelected("");setDetail(null);}
  }
  async function openDraft(id:string){
@@ -128,8 +130,8 @@ export default function ContentStudioPage(){
      <button className="studio-primary" disabled={busy||!ai?.configured||!org||!topic.trim()}>{busy?"در حال تولید و ذخیره…":"✦ تولید محتوا با هوش مصنوعی"}</button>
      <small>تولید فقط با سرویس واقعی انجام می‌شود؛ در صورت نبود اتصال، متن ساختگی ساخته نخواهد شد.</small>
     </form>:<form onSubmit={createManual} className="studio-form">
-     <label>عنوان محتوا<input required maxLength={240} value={manualTitle} onChange={e=>setManualTitle(e.target.value)} placeholder="عنوان مخصوص این پیام‌رسان"/></label>
-     <label>متن محتوا<textarea required maxLength={30000} rows={9} value={manualContent} onChange={e=>setManualContent(e.target.value)} placeholder="متن، هشتگ‌ها، لینک و فراخوان اقدام..."/></label>
+     <label>عنوان محتوا<select value="" onChange={e=>{const t=textTemplates.find(x=>x.id===e.target.value&&x.field==="title");if(t)setManualTitle(t.content);}}><option value="">درج عنوان آماده…</option>{textTemplates.filter(x=>x.field==="title").map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><input required maxLength={240} value={manualTitle} onChange={e=>setManualTitle(e.target.value)} placeholder="عنوان مخصوص این پیام‌رسان"/></label>
+     <label>متن محتوا<select value="" onChange={e=>{const t=textTemplates.find(x=>x.id===e.target.value&&x.field==="body");if(t)setManualContent(t.content);}}><option value="">درج متن آماده…</option>{textTemplates.filter(x=>x.field==="body").map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><textarea required maxLength={30000} rows={9} value={manualContent} onChange={e=>setManualContent(e.target.value)} placeholder="متن، هشتگ‌ها، لینک و فراخوان اقدام..."/></label>
      <label>برند<select value={brandId} onChange={e=>setBrandId(e.target.value)}><option value="">بدون انتخاب برند</option>{brands.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
      <button className="studio-primary" disabled={busy||!org||!manualTitle.trim()||!manualContent.trim()}>ذخیره پیش‌نویس دستی</button>
      <small>پیش‌نویس دستی هم وارد گردش نسخه‌بندی و تأیید محتوا می‌شود.</small>

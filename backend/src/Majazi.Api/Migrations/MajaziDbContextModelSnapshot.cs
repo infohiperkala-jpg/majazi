@@ -14,6 +14,24 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
     {
         modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+        modelBuilder.Entity("Majazi.Api.Models.TextTemplate", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("uuid");
+            b.Property<string>("Content").IsRequired().HasMaxLength(8000).HasColumnType("character varying(8000)");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+            b.Property<string>("Field").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+            b.Property<bool>("IsActive").HasColumnType("boolean");
+            b.Property<string>("Module").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+            b.Property<string>("Name").IsRequired().HasMaxLength(120).HasColumnType("character varying(120)");
+            b.Property<Guid>("OrganizationId").HasColumnType("uuid");
+            b.Property<int>("SortOrder").HasColumnType("integer");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("timestamp with time zone");
+            b.HasKey("Id");
+            b.HasIndex("OrganizationId", "Module", "Field", "Name").IsUnique();
+            b.HasIndex("OrganizationId", "Module", "Field", "SortOrder");
+            b.ToTable("text_templates", (string)null);
+        });
+
         modelBuilder.Entity("Majazi.Api.Models.StatusDefinition", b =>
         {
             b.Property<Guid>("Id").HasColumnType("uuid");

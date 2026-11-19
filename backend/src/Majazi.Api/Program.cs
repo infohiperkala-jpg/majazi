@@ -1280,6 +1280,103 @@ aiApi.MapPost("/generate-text", async (Guid organizationId, GenerateAssistantTex
     }
 });
 
+var defaultTextTemplates = new Dictionary<string, (string Name, string Content)[]>
+{
+    ["crm|contact.notes"] = [("یادداشت پیگیری مخاطب", "مخاطب از طریق [منبع آشنایی] با مجموعه آشنا شده است. نیاز اصلی: [نیاز مخاطب]. اقدام بعدی: [اقدام و زمان پیگیری].")],
+    ["crm|lead.notes"] = [("خلاصه فرصت فروش", "نیاز مشتری: [شرح نیاز]. راهکار پیشنهادی: [راهکار]. ارزش و اولویت فرصت: [جزئیات]. گام بعدی: [اقدام، مسئول و موعد].")],
+    ["crm|activity.summary"] = [("گزارش تماس", "تماس با [نام مخاطب] درباره [موضوع] انجام شد. نتیجه: [نتیجه گفتگو]. اقدام بعدی: [اقدام و زمان].")],
+    ["campaign|objective"] = [("هدف کمپین فروش", "افزایش آگاهی و جذب مخاطبان واجد شرایط برای [محصول/خدمت] و تبدیل آن‌ها به سرنخ و فروش قابل اندازه‌گیری در بازه [زمان].")],
+    ["campaign|notes"] = [("چک‌لیست اجرای کمپین", "مخاطب هدف: [گروه مخاطب]. پیام اصلی: [پیام]. دارایی‌های موردنیاز: [محتوا و خلاقه]. شاخص‌های سنجش: [KPI]. مسئول اجرا: [نام].")],
+    ["inbox|conversation.subject"] = [("عنوان پیگیری مشتری", "پیگیری درخواست [موضوع] - [نام مخاطب]")],
+    ["inbox|message.reply"] = [("پاسخ اولیه پشتیبانی", "سلام، پیام شما دریافت شد. برای بررسی دقیق‌تر، لطفاً [اطلاعات تکمیلی موردنیاز] را ارسال کنید. پس از بررسی، نتیجه را اطلاع می‌دهیم.")],
+    ["content|title"] = [("عنوان معرفی محصول", "معرفی [نام محصول]؛ راهکاری برای [نیاز مخاطب]")],
+    ["content|body"] = [("متن معرفی محصول", "[نام محصول/خدمت] برای افرادی طراحی شده است که به [نیاز اصلی] اهمیت می‌دهند. ویژگی‌های مهم: [ویژگی‌ها]. برای دریافت اطلاعات بیشتر، [دعوت به اقدام].")],
+    ["content|description"] = [("توضیح کوتاه", "[نام محصول/خدمت] با تمرکز بر [مزیت اصلی] به شما کمک می‌کند [نتیجه مورد انتظار]. برای آشنایی بیشتر با جزئیات و شرایط، با ما در ارتباط باشید.")]
+};
+
+var templatesApi = app.MapGroup("/api/organizations/{organizationId:guid}/text-templates").RequireAuthorization();
+templatesApi.MapGet("/", async (Guid organizationId, string? module, string? field, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var keys = defaultTextTemplates.Keys.Where(key =>
+    {
+        var parts = key.Split('|', 2);
+        return (string.IsNullOrWhiteSpace(module) || parts[0] == module) &&
+               (string.IsNullOrWhiteSpace(field) || parts[1] == field);
+    }).ToArray();
+    foreach (var key in keys)
+    {
+        var parts = key.Split('|', 2);
+        if (await db.TextTemplates.AnyAsync(x => x.OrganizationId == organizationId && x.Module == parts[0] && x.Field == parts[1], ct)) continue;
+        var now = DateTimeOffset.UtcNow;
+        db.TextTemplates.AddRange(defaultTextTemplates[key].Select((item, index) => new TextTemplate
+        {
+            OrganizationId = organizationId, Module = parts[0], Field = parts[1], Name = item.Name,
+            Content = item.Content, SortOrder = (index + 1) * 10, IsActive = true, CreatedAt = now, UpdatedAt = now
+        }));
+    }
+    if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
+    var query = db.TextTemplates.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+    if (!string.IsNullOrWhiteSpace(module)) query = query.Where(x => x.Module == module);
+    if (!string.IsNullOrWhiteSpace(field)) query = query.Where(x => x.Field == field);
+    var items = await query.OrderBy(x => x.Module).ThenBy(x => x.Field).ThenBy(x => x.SortOrder)
+        .Select(x => new { x.Id, x.Module, x.Field, x.Name, x.Content, x.SortOrder, x.IsActive, x.CreatedAt, x.UpdatedAt }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+templatesApi.MapPost("/", async (Guid organizationId, TextTemplateRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var module = request.Module?.Trim().ToLowerInvariant(); var field = request.Field?.Trim().ToLowerInvariant();
+    var name = request.Name?.Trim(); var content = request.Content?.Trim();
+    if (module is null || field is null || !defaultTextTemplates.ContainsKey(module + "|" + field) ||
+        string.IsNullOrWhiteSpace(name) || name.Length > 120 || string.IsNullOrWhiteSpace(content) || content.Length > 8000 ||
+        request.SortOrder < 0 || request.SortOrder > 10000)
+        return Results.BadRequest(new { error = "ماژول، فیلد، نام، متن یا ترتیب قالب معتبر نیست." });
+    if (await db.TextTemplates.AnyAsync(x => x.OrganizationId == organizationId && x.Module == module && x.Field == field && x.Name == name, ct))
+        return Results.Conflict(new { error = "قالبی با این نام برای این فیلد وجود دارد." });
+    var item = new TextTemplate { OrganizationId = organizationId, Module = module, Field = field, Name = name, Content = content, SortOrder = request.SortOrder, IsActive = request.IsActive };
+    db.TextTemplates.Add(item); await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/organizations/{organizationId}/text-templates/{item.Id}", new { item.Id, item.Module, item.Field, item.Name, item.Content, item.SortOrder, item.IsActive, item.CreatedAt, item.UpdatedAt });
+});
+
+templatesApi.MapPut("/{templateId:guid}", async (Guid organizationId, Guid templateId, UpdateTextTemplateRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.TextTemplates.SingleOrDefaultAsync(x => x.Id == templateId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    var name = request.Name?.Trim(); var content = request.Content?.Trim();
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 120 || string.IsNullOrWhiteSpace(content) || content.Length > 8000 || request.SortOrder < 0 || request.SortOrder > 10000)
+        return Results.BadRequest(new { error = "نام، متن یا ترتیب قالب معتبر نیست." });
+    if (await db.TextTemplates.AnyAsync(x => x.Id != templateId && x.OrganizationId == organizationId && x.Module == item.Module && x.Field == item.Field && x.Name == name, ct))
+        return Results.Conflict(new { error = "قالب دیگری با این نام برای این فیلد وجود دارد." });
+    item.Name = name; item.Content = content; item.SortOrder = request.SortOrder; item.IsActive = request.IsActive; item.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { item.Id, item.Module, item.Field, item.Name, item.Content, item.SortOrder, item.IsActive, item.UpdatedAt });
+});
+
+templatesApi.MapDelete("/{templateId:guid}", async (Guid organizationId, Guid templateId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var item = await db.TextTemplates.SingleOrDefaultAsync(x => x.Id == templateId && x.OrganizationId == organizationId, ct);
+    if (item is null) return Results.NotFound();
+    item.IsActive = false; item.UpdatedAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
 var contentApi = app.MapGroup("/api/organizations/{organizationId:guid}/content").RequireAuthorization();
 
 var growthAgentApi = app.MapGroup("/api/organizations/{organizationId:guid}/growth-agent").RequireAuthorization();
@@ -2016,6 +2113,8 @@ record MetaOAuthState(Guid UserId, Guid OrganizationId, Guid? BrandId, string Di
 public sealed record CreateManualContentDraftRequest(Guid? BrandId, string? Title, string? Content, string? Channel, string? Tone);
 public sealed record GenerateContentRequest(Guid? BrandId, string? Topic, string? Channel, string? Tone, string? Instructions);
 public sealed record GenerateAssistantTextRequest(string? Module, string? Field, string? Context, string? CurrentText, string? Instructions);
+public sealed record TextTemplateRequest(string? Module, string? Field, string? Name, string? Content, int SortOrder, bool IsActive = true);
+public sealed record UpdateTextTemplateRequest(string? Name, string? Content, int SortOrder, bool IsActive);
 public sealed record EditContentDraftRequest(string? Title, string? Content, string? ChangeNote);
 
 public sealed record ScheduleContentRequest(Guid ConnectionId, string? TargetChatId, DateTimeOffset? ScheduledAt);
