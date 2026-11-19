@@ -77,15 +77,37 @@ public sealed class ContentPublishingWorker(
                 var token = protector.Unprotect(connection.EncryptedAccessToken);
                 if (connection.Provider == "Telegram")
                 {
-                    using var response = await httpClientFactory.CreateClient("TelegramBotApi")
-                        .PostAsJsonAsync($"https://api.telegram.org/bot{token}/sendMessage",
-                            new { chat_id = draft.PublishTarget, text = draft.Content, disable_web_page_preview = false }, ct);
-                    var payload = await response.Content.ReadAsStringAsync(ct);
-                    if (!response.IsSuccessStatusCode)
-                        throw new InvalidOperationException("Telegram API returned HTTP " + (int)response.StatusCode + ".");
-                    using var json = JsonDocument.Parse(payload);
-                    if (!json.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
-                        throw new InvalidOperationException("Telegram did not accept the publication.");
+                    var attachment = await db.ContentDraftAttachments.AsNoTracking()
+                        .SingleOrDefaultAsync(x => x.DraftId == draft.Id, ct);
+                    HttpResponseMessage response;
+                    if (attachment is null)
+                    {
+                        response = await httpClientFactory.CreateClient("TelegramBotApi")
+                            .PostAsJsonAsync($"https://api.telegram.org/bot{token}/sendMessage",
+                                new { chat_id = draft.PublishTarget, text = draft.Content, disable_web_page_preview = false }, ct);
+                    }
+                    else
+                    {
+                        if (draft.Content.Length > 1024)
+                            throw new InvalidOperationException("متن همراه فایل تلگرام حداکثر ۱۰۲۴ نویسه است؛ محتوا را کوتاه کنید.");
+                        using var multipart = new MultipartFormDataContent();
+                        multipart.Add(new StringContent(draft.PublishTarget!), "chat_id");
+                        multipart.Add(new StringContent(draft.Content), "caption");
+                        var fileContent = new ByteArrayContent(attachment.Data);
+                        fileContent.Headers.ContentType = new MediaTypeHeaderValue(attachment.ContentType);
+                        multipart.Add(fileContent, "document", attachment.FileName);
+                        response = await httpClientFactory.CreateClient("TelegramBotApi")
+                            .PostAsync($"https://api.telegram.org/bot{token}/sendDocument", multipart, ct);
+                    }
+                    using (response)
+                    {
+                        var payload = await response.Content.ReadAsStringAsync(ct);
+                        if (!response.IsSuccessStatusCode)
+                            throw new InvalidOperationException("Telegram API returned HTTP " + (int)response.StatusCode + ".");
+                        using var json = JsonDocument.Parse(payload);
+                        if (!json.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
+                            throw new InvalidOperationException("Telegram did not accept the publication.");
+                    }
                 }
                 else
                 {
