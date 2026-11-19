@@ -1401,7 +1401,7 @@ channelsApi.MapPost("/{connectionId:guid}/verify", async (Guid organizationId, G
         .Select(x => x.Role).SingleOrDefaultAsync(ct);
     if (role is not ("Owner" or "Admin")) return Results.Forbid();
     var item = await db.SocialChannelConnections.SingleOrDefaultAsync(
-        x => x.Id == connectionId && x.OrganizationId == organizationId && x.Provider == "Telegram", ct);
+        x => x.Id == connectionId && x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Bale" || x.Provider == "Rubika"), ct);
     if (item is null) return Results.NotFound();
     if (string.IsNullOrWhiteSpace(item.EncryptedAccessToken))
         return Results.BadRequest(new { error = "برای این کانال توکن ربات ثبت نشده است." });
