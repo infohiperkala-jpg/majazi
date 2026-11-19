@@ -143,6 +143,9 @@ public sealed class MajaziDbContext(DbContextOptions<MajaziDbContext> options) :
             e.Property(x => x.Status).HasMaxLength(24).IsRequired();
             e.Property(x => x.Prompt).HasMaxLength(4000);
             e.Property(x => x.AiModel).HasMaxLength(120);
+            e.Property(x => x.PublishTarget).HasMaxLength(180);
+            e.Property(x => x.PublishError).HasMaxLength(1000);
+            e.HasIndex(x => new { x.Status, x.ScheduledAt });
             e.HasIndex(x => new { x.OrganizationId, x.Status, x.UpdatedAt });
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Brand>().WithMany().HasForeignKey(x => x.BrandId).OnDelete(DeleteBehavior.SetNull);
