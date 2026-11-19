@@ -2627,8 +2627,6 @@ static async Task<AiProviderConfig> ResolveAiProviderConfigAsync(MajaziDbContext
     return new AiProviderConfig(key, saved.BaseUrl, saved.Model, saved.IsEnabled, true);
 }
 
-public sealed record AiProviderConfig(string? ApiKey, string? BaseUrl, string? Model, bool Enabled, bool OrganizationConfigured);
-
 static void RecordAuditEvent(MajaziDbContext db, Guid organizationId, Guid? actorUserId,
     string action, string entityType, Guid? entityId, string summary, object? metadata = null)
 {
@@ -2761,3 +2759,4 @@ public sealed record KnowledgeArticleRequest(string? Title, string? Slug, string
 public sealed record KnowledgeArticleStatusRequest(string? Status);
 public sealed record KnowledgeRestoreRequest(int Version, string? ChangeNote);
 public sealed record OrganizationAiProviderSettingsRequest(string? BaseUrl, string? Model, string? ApiKey, bool ClearApiKey, bool IsEnabled);
+public sealed record AiProviderConfig(string? ApiKey, string? BaseUrl, string? Model, bool Enabled, bool OrganizationConfigured);
