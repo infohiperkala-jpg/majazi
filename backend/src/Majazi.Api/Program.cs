@@ -682,7 +682,7 @@ crmApi.MapGet("/activities", async (Guid organizationId, ClaimsPrincipal princip
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     var items = await db.CrmActivities.AsNoTracking().Where(x => x.OrganizationId == organizationId)
         .OrderByDescending(x => x.OccurredAt).Take(100)
-        .Select(x => new { x.Id, x.ContactId, x.LeadId, x.ActivityType, x.Summary, x.OccurredAt, x.CreatedByUserId, ContactName = x.Contact == null ? null : x.Contact.FullName, LeadTitle = x.Lead == null ? null : x.Lead.Title }).ToListAsync(ct);
+        .Select(x => new { x.Id, x.ContactId, x.LeadId, x.ActivityType, x.Summary, x.OccurredAt, x.CreatedByUserId, ContactName = db.CrmContacts.Where(c => c.Id == x.ContactId).Select(c => c.FullName).FirstOrDefault(), LeadTitle = x.Lead == null ? null : x.Lead.Title }).ToListAsync(ct);
     return Results.Ok(items);
 });
 
