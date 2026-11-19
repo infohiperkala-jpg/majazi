@@ -10,7 +10,7 @@ type Draft={id:string;scheduledAt?:string|null;publishedAt?:string|null;publishE
 type Version={id:string;versionNumber:number;title:string;content:string;changeNote:string;createdAt:string};
 type Approval={id:string;reviewRound:number;stageNumber:number;decision:string;comment?:string|null;actorUserId:string;createdAt:string};
 type AIStatus={configured:boolean;model:string;provider:string;keyStored:boolean};
-type PublishTarget={id:string;displayName:string;externalAccountId?:string|null};
+type PublishTarget={id:string;displayName:string;externalAccountId?:string|null;provider:string};
 type CalendarItem={id:string;title:string;channel:string;status:string;scheduledAt?:string|null;publishedAt?:string|null;publishError?:string|null};
 type TextTemplate={id:string;module:string;field:string;name:string;content:string;isActive:boolean;sortOrder:number};
 async function api<T>(path:string,token:string,init?:RequestInit):Promise<T>{
@@ -76,14 +76,14 @@ export default function ContentStudioPage(){
  }
  async function schedule(){
   if(!selected)return;await run(async()=>{
-   if(!connectionId||!targetChatId.trim()||!scheduledAt)throw new Error("اتصال تلگرام، شناسه مقصد و زمان انتشار را مشخص کنید.");
+   if(!connectionId||!targetChatId.trim()||!scheduledAt)throw new Error("اتصال پیام‌رسان، شناسه مقصد و زمان انتشار را مشخص کنید.");
    await api(base+"/drafts/"+selected+"/schedule",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim(),scheduledAt:new Date(scheduledAt).toISOString()})});
    await openDraft(selected);await refresh();setNotice("محتوا برای انتشار زمان‌بندی شد.");
   });
  }
  async function publishNow(){
   if(!selected)return;await run(async()=>{
-   if(!connectionId||!targetChatId.trim())throw new Error("اتصال تلگرام و شناسه مقصد را مشخص کنید.");
+   if(!connectionId||!targetChatId.trim())throw new Error("اتصال پیام‌رسان و شناسه مقصد را مشخص کنید.");
    await api(base+"/drafts/"+selected+"/publish-now",token,{method:"POST",body:JSON.stringify({connectionId,targetChatId:targetChatId.trim()})});
    await openDraft(selected);await refresh();setNotice("محتوا در صف ارسال فوری قرار گرفت.");
   });
@@ -125,7 +125,7 @@ export default function ContentStudioPage(){
     {createMode==="ai"?<form onSubmit={generate} className="studio-form">
      <label>موضوع یا ایده محتوا<textarea value={topic} onChange={e=>setTopic(e.target.value)} required maxLength={1500} rows={4} placeholder="مثلاً معرفی مزیت رقابتی محصول و دعوت مخاطب به اقدام..."/></label>
      <label>برند<select value={brandId} onChange={e=>setBrandId(e.target.value)}><option value="">بدون انتخاب برند</option>{brands.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
-     <div className="studio-form-row"><label>کانال انتشار<select value={channel} onChange={e=>setChannel(e.target.value)}>{["Instagram","Telegram","WhatsApp","Website","LinkedIn","Email","General"].map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>لحن<select value={tone} onChange={e=>setTone(e.target.value)}>{["حرفه‌ای و متقاعدکننده","رسمی","دوستانه","لوکس و پریمیوم","آموزشی","خلاقانه","فروش‌محور"].map(x=><option key={x}>{x}</option>)}</select></label></div>
+     <div className="studio-form-row"><label>کانال انتشار<select value={channel} onChange={e=>setChannel(e.target.value)}>{["Instagram","Telegram","Eitaa","WhatsApp","Website","LinkedIn","Email","General"].map(x=><option key={x} value={x}>{x==="Eitaa"?"ایتا":x}</option>)}</select></label><label>لحن<select value={tone} onChange={e=>setTone(e.target.value)}>{["حرفه‌ای و متقاعدکننده","رسمی","دوستانه","لوکس و پریمیوم","آموزشی","خلاقانه","فروش‌محور"].map(x=><option key={x}>{x}</option>)}</select></label></div>
      <label>دستور تکمیلی<textarea value={instructions} onChange={e=>setInstructions(e.target.value)} maxLength={4000} rows={3} placeholder="مخاطب هدف، کلمات کلیدی، محدودیت‌ها و فراخوان اقدام..."/></label>
      <button className="studio-primary" disabled={busy||!ai?.configured||!org||!topic.trim()}>{busy?"در حال تولید و ذخیره…":"✦ تولید محتوا با هوش مصنوعی"}</button>
      <small>تولید فقط با سرویس واقعی انجام می‌شود؛ در صورت نبود اتصال، متن ساختگی ساخته نخواهد شد.</small>
@@ -147,14 +147,14 @@ export default function ContentStudioPage(){
    <div className="studio-editor-heading"><div><span>03 / EDITOR · {detail.aiModel||"MANUAL"}</span><h2>ویرایش و بازبینی محتوا</h2><p>هر ذخیره‌سازی یک نسخه مستقل در تاریخچه ایجاد می‌کند.</p></div><span className={"draft-status "+(detail.status==="Approved"||detail.status==="Published"?"approved":"")}>{statuses[detail.status]??detail.status}</span></div>
    <div className="studio-editor-grid"><div className="studio-edit-fields"><label>عنوان محتوا<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={240}/></label><label>متن محتوا<textarea value={content} onChange={e=>setContent(e.target.value)} rows={15} maxLength={30000}/></label><div className="studio-editor-actions"><button className="studio-primary" disabled={busy||!title.trim()||!content.trim()} onClick={()=>void save()}>ذخیره و ایجاد نسخه</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void approve()}>{detail.status==="InReview"?"ثبت تأیید مرحله دوم":"ثبت تأیید مرحله اول"}</button><button className="studio-approve" disabled={busy||!["Draft","InReview"].includes(detail.status)||!approvalComment.trim()||!["Owner","Admin"].includes(orgs.find(x=>x.id===org)?.role??"")} onClick={()=>void reject()}>رد و بازگشت برای اصلاح</button></div><label>یادداشت بازبینی (برای رد الزامی)<textarea value={approvalComment} onChange={e=>setApprovalComment(e.target.value)} rows={2} maxLength={1000} placeholder="نکات اصلاح یا توضیح تأیید..."/></label><div className="studio-history"><h3>گردش تأیید دو مرحله‌ای</h3>{approvals.length===0?<small>هنوز تصمیمی ثبت نشده است.</small>:approvals.map(a=><div key={a.id}><b>دور {a.reviewRound} · مرحله {a.stageNumber} · {a.decision==="Approved"?"تأیید":"رد"}</b><span>{a.comment||"بدون یادداشت"}</span><small>{new Date(a.createdAt).toLocaleString("fa-IR")}</small></div>)}</div><small>تأیید نهایی نیازمند دو مدیر متفاوت (مالک یا مدیر سازمان) است. ویرایش محتوا در جریان بازبینی، دور جدیدی ایجاد می‌کند.</small>
     {<section className="studio-publish"><h3>ارسال به {detail.channel==="Instagram"?"اینستاگرام":detail.channel==="Telegram"?"تلگرام":detail.channel==="Bale"?"بله":detail.channel==="Rubika"?"روبیکا":detail.channel==="Eitaa"?"ایتا":detail.channel==="WhatsApp"?"واتساپ":detail.channel}</h3><p>انتشار فقط پس از تأیید نهایی و انتخاب مقصد مشخص انجام می‌شود.</p>
-     {detail.channel==="Telegram"&&<><label>ربات متصل<select value={connectionId} onChange={e=>setConnectionId(e.target.value)}><option value="">انتخاب اتصال</option>{targets.map(t=><option key={t.id} value={t.id}>{t.displayName}</option>)}</select></label>
-     <label>شناسه عددی چت / کانال مقصد<input value={targetChatId} onChange={e=>setTargetChatId(e.target.value)} placeholder="مثلاً -1001234567890 یا @channelname"/></label>
-     <div className="studio-schedule-row"><label>زمان انتشار<input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label><button className="studio-approve" disabled={busy||detail.status!=="Approved"||!targets.length||!targetChatId.trim()||!scheduledAt} onClick={()=>void schedule()}>زمان‌بندی انتشار</button></div>
-     <div className="studio-editor-actions"><button className="studio-primary" disabled={busy||detail.status!=="Approved"||!targets.length||!targetChatId.trim()} onClick={()=>void publishNow()}>ارسال فوری به تلگرام</button>{detail.status==="Scheduled"&&<button className="studio-approve" disabled={busy} onClick={()=>void cancelSchedule()}>لغو زمان‌بندی</button>}</div>
+     {(detail.channel==="Telegram"||detail.channel==="Eitaa")&&<><label>ربات متصل<select value={connectionId} onChange={e=>setConnectionId(e.target.value)}><option value="">انتخاب اتصال</option>{targets.filter(t=>t.provider===detail.channel).map(t=><option key={t.id} value={t.id}>{t.displayName}</option>)}</select></label>
+     <label>شناسه عددی چت / کانال مقصد<input value={targetChatId} onChange={e=>setTargetChatId(e.target.value)} placeholder={detail.channel==="Eitaa"?"شناسه ایتا یا @username":"مثلاً -1001234567890 یا @channelname"}/></label>
+     <div className="studio-schedule-row"><label>زمان انتشار<input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label><button className="studio-approve" disabled={busy||detail.status!=="Approved"||!targets.some(t=>t.provider===detail.channel)||!targetChatId.trim()||!scheduledAt} onClick={()=>void schedule()}>زمان‌بندی انتشار</button></div>
+     <div className="studio-editor-actions"><button className="studio-primary" disabled={busy||detail.status!=="Approved"||!targets.some(t=>t.provider===detail.channel)||!targetChatId.trim()} onClick={()=>void publishNow()}>ارسال فوری به {detail.channel==="Eitaa"?"ایتا":"تلگرام"}</button>{detail.status==="Scheduled"&&<button className="studio-approve" disabled={busy} onClick={()=>void cancelSchedule()}>لغو زمان‌بندی</button>}</div>
      {detail.status==="Scheduled"&&<small>زمان انتشار: {detail.scheduledAt?new Date(detail.scheduledAt).toLocaleString("fa-IR"):"در صف"}</small>}
      {detail.status==="PublishFailed"&&<small className="publish-error">ارسال ناموفق بود: {detail.publishError||"اتصال ربات، مجوز ارسال و شناسه مقصد را بررسی کنید."} سپس محتوا را دوباره تأیید و زمان‌بندی کنید.</small>}
      {detail.status==="Published"&&<small>منتشرشده در {detail.publishedAt?new Date(detail.publishedAt).toLocaleString("fa-IR"):""}</small>}
-    </>}{detail.channel!=="Telegram"&&<small>آداپتور ارسال رسمی {detail.channel} هنوز در MAJAZI فعال نشده است. محتوا ذخیره و قابل ویرایش و تأیید است؛ ارسال واقعی پس از پیاده‌سازی و اتصال API رسمی همین پلتفرم فعال می‌شود.</small>}
+    </>}{detail.channel==="Eitaa"&&<small>ارسال واقعی از طریق API ایتایار انجام می‌شود. توکن ثبت‌شده باید توکن ایتایار باشد و مقصد باید در پنل ایتایار مجاز شده باشد. این نسخه دریافت پیام ورودی و همگام‌سازی Inbox را ارائه نمی‌کند.</small>}{detail.channel!=="Telegram"&&detail.channel!=="Eitaa"&&<small>آداپتور ارسال رسمی {detail.channel} هنوز در MAJAZI فعال نشده است. محتوا ذخیره و قابل ویرایش و تأیید است؛ ارسال واقعی پس از پیاده‌سازی و اتصال API رسمی همین پلتفرم فعال می‌شود.</small>}
     </section>}</div>
     <aside className="studio-history"><h3>تاریخچه نسخه‌ها</h3>{(detail.versions??[]).map(v=><button key={v.id} onClick={()=>{setTitle(v.title);setContent(v.content);}}><b>نسخه {v.versionNumber}</b><span>{v.changeNote}</span><small>{new Date(v.createdAt).toLocaleString("fa-IR")}</small></button>)}</aside>
    </div>
