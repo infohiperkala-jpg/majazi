@@ -956,31 +956,86 @@ inboxApi.MapPost("/conversations", async (Guid organizationId, CreateInboxConver
 });
 
 inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid organizationId, Guid conversationId,
-    CreateInboxMessageRequest request, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+    CreateInboxMessageRequest request, ClaimsPrincipal principal, MajaziDbContext db,
+    IDataProtectionProvider protection, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
-    var conversation = await db.InboxConversations.SingleOrDefaultAsync(
-        x => x.Id == conversationId && x.OrganizationId == organizationId, ct);
+    var conversation = await db.InboxConversations
+        .Include(x => x.ChannelConnection)
+        .SingleOrDefaultAsync(x => x.Id == conversationId && x.OrganizationId == organizationId, ct);
     if (conversation is null) return Results.NotFound();
     var body = request.Body?.Trim();
     if (string.IsNullOrWhiteSpace(body) || body.Length > 10000)
         return Results.BadRequest(new { error = "متن پیام الزامی است و حداکثر 10000 کاراکتر می‌تواند باشد." });
     if (conversation.Status == "Resolved")
         return Results.Conflict(new { error = "مکالمه بسته شده است؛ ابتدا وضعیت آن را به باز تغییر دهید." });
+
     var message = new InboxMessage
     {
         ConversationId = conversationId, Direction = "Outbound", Body = body,
         Status = "Queued", CreatedByUserId = userId.Value
     };
+
+    // Telegram replies are delivered synchronously through the official Bot API.
+    // Other providers remain explicitly queued until their official delivery adapter is implemented.
+    if (conversation.ChannelConnection?.Provider == "Telegram")
+    {
+        if (conversation.ChannelConnection.Status != "Connected" ||
+            string.IsNullOrWhiteSpace(conversation.ChannelConnection.EncryptedAccessToken))
+            return Results.Conflict(new { error = "ربات تلگرام متصل و تأییدشده نیست." });
+        if (!long.TryParse(conversation.ExternalConversationId, out var chatId))
+            return Results.Conflict(new { error = "شناسه گفتگوی تلگرام معتبر نیست؛ مکالمه باید از webhook تلگرام دریافت شده باشد." });
+
+        string botToken;
+        try
+        {
+            botToken = protection.CreateProtector("Majazi.SocialConnections.v1")
+                .Unprotect(conversation.ChannelConnection.EncryptedAccessToken);
+        }
+        catch (CryptographicException)
+        {
+            return Results.Conflict(new { error = "توکن ربات قابل رمزگشایی نیست؛ اتصال تلگرام را دوباره برقرار کنید." });
+        }
+
+        try
+        {
+            using var response = await httpClientFactory.CreateClient("TelegramBotApi").PostAsJsonAsync(
+                $"https://api.telegram.org/bot{botToken}/sendMessage",
+                new { chat_id = chatId, text = body, disable_web_page_preview = true }, ct);
+            using var payload = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var root = payload.RootElement;
+            if (!response.IsSuccessStatusCode || !root.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+                return Results.Problem("تلگرام پیام را نپذیرفت؛ پیام در سامانه ثبت نشد.", statusCode: 502);
+            if (root.TryGetProperty("result", out var result) &&
+                result.TryGetProperty("message_id", out var externalMessageId))
+                message.ExternalMessageId = externalMessageId.ToString();
+            message.Status = "Sent";
+            message.SentAt = DateTimeOffset.UtcNow;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return Results.Problem("ارسال پیام به تلگرام در زمان مقرر پاسخ نداد؛ وضعیت تحویل را در تلگرام بررسی کنید.", statusCode: 504);
+        }
+        catch (HttpRequestException)
+        {
+            return Results.Problem("ارتباط با Telegram Bot API برقرار نشد؛ پیام در سامانه ثبت نشد.", statusCode: 502);
+        }
+    }
+
     db.InboxMessages.Add(message);
     conversation.LastMessageAt = message.CreatedAt;
     conversation.UpdatedAt = DateTimeOffset.UtcNow;
     conversation.Status = "Pending";
     await db.SaveChangesAsync(ct);
+    var delivered = message.Status == "Sent";
     return Results.Created($"/api/organizations/{organizationId}/inbox/conversations/{conversationId}/messages/{message.Id}",
-        new { message.Id, message.Direction, message.Body, message.Status, message.CreatedAt,
-            deliveryNote = "پیام در صف داخلی ثبت شد؛ تا زمان فعال‌سازی ارسال‌گر رسمی کانال، به مقصد ارسال نشده است." });
+        new { message.Id, message.Direction, message.Body, message.Status, message.ExternalMessageId,
+            message.SentAt, message.CreatedAt,
+            deliveryNote = delivered
+                ? "پیام با موفقیت از طریق Telegram Bot API ارسال شد."
+                : "پیام فقط در صف داخلی ثبت شد؛ ارسال‌گر رسمی این کانال هنوز فعال نیست." });
 });
 
 inboxApi.MapPatch("/conversations/{conversationId:guid}", async (Guid organizationId, Guid conversationId,
