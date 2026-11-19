@@ -1185,14 +1185,22 @@ growthAgentApi.MapPut("/", async (Guid organizationId, GrowthAgentSettingsReques
 });
 
 
-contentApi.MapGet("/ai/status", (IConfiguration config) => Results.Ok(new
+contentApi.MapGet("/ai/status", (IConfiguration config) =>
 {
-    configured = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]) &&
-        Uri.TryCreate(config["AI:BaseUrl"], UriKind.Absolute, out _),
-    model = config["AI:Model"] ?? "not-configured",
-    provider = "OpenAI-compatible",
-    keyStored = !string.IsNullOrWhiteSpace(config["AI:ApiKey"])
-}));
+    var baseUrl = config["AI:BaseUrl"]?.Trim();
+    var model = config["AI:Model"]?.Trim();
+    var keyStored = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]);
+    var endpointValid = Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) &&
+        (endpoint.Scheme == Uri.UriSchemeHttps || endpoint.IsLoopback);
+    return Results.Ok(new
+    {
+        configured = keyStored && endpointValid && !string.IsNullOrWhiteSpace(model),
+        model = string.IsNullOrWhiteSpace(model) ? "not-configured" : model,
+        provider = "OpenAI-compatible",
+        keyStored,
+        endpointValid
+    });
+});
 
 
 contentApi.MapGet("/publish-targets", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
@@ -1326,6 +1334,9 @@ contentApi.MapPost("/drafts", async (Guid organizationId, CreateManualContentDra
     if (string.IsNullOrWhiteSpace(title) || title.Length > 240 || string.IsNullOrWhiteSpace(content) ||
         content.Length > 30000 || channel.Length > 40 || tone.Length > 40)
         return Results.BadRequest(new { error = "عنوان، متن، کانال یا لحن معتبر نیست." });
+    if (request.BrandId is Guid brandId &&
+        !await db.Brands.AnyAsync(x => x.Id == brandId && x.OrganizationId == organizationId, ct))
+        return Results.BadRequest(new { error = "برند انتخاب‌شده متعلق به این سازمان نیست." });
     var draft = new ContentDraft
     {
         OrganizationId = organizationId, BrandId = request.BrandId, CreatedByUserId = userId.Value,
