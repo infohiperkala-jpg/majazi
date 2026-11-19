@@ -91,18 +91,38 @@ public sealed class ContentPublishingWorker(
                 {
                     try
                     {
-                        var endpoint = $"https://eitaayar.ir/api/{Uri.EscapeDataString(token)}/sendMessage";
-                        using var response = await httpClientFactory.CreateClient("EitaaYar").PostAsync(endpoint,
-                            new FormUrlEncodedContent(new Dictionary<string, string>
+                        var attachment = await db.ContentDraftAttachments.AsNoTracking()
+                            .SingleOrDefaultAsync(x => x.DraftId == draft.Id, ct);
+                        var method = attachment is null ? "sendMessage" : "sendFile";
+                        var endpoint = $"https://eitaayar.ir/api/{Uri.EscapeDataString(token)}/{method}";
+                        HttpContent requestContent;
+                        if (attachment is null)
+                        {
+                            requestContent = new FormUrlEncodedContent(new Dictionary<string, string>
                             {
                                 ["chat_id"] = draft.PublishTarget!,
                                 ["text"] = draft.Content
-                            }), ct);
-                        if (!response.IsSuccessStatusCode)
-                            throw new InvalidOperationException("EitaaYar returned HTTP " + (int)response.StatusCode + ".");
-                        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                        if (!json.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
-                            throw new InvalidOperationException("EitaaYar did not accept the publication.");
+                            });
+                        }
+                        else
+                        {
+                            var multipart = new MultipartFormDataContent();
+                            multipart.Add(new StringContent(draft.PublishTarget!), "chat_id");
+                            multipart.Add(new StringContent(draft.Content), "caption");
+                            var fileContent = new ByteArrayContent(attachment.Data);
+                            fileContent.Headers.ContentType = new MediaTypeHeaderValue(attachment.ContentType);
+                            multipart.Add(fileContent, "file", attachment.FileName);
+                            requestContent = multipart;
+                        }
+                        using (requestContent)
+                        using (var response = await httpClientFactory.CreateClient("EitaaYar").PostAsync(endpoint, requestContent, ct))
+                        {
+                            if (!response.IsSuccessStatusCode)
+                                throw new InvalidOperationException("EitaaYar returned HTTP " + (int)response.StatusCode + ".");
+                            using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                            if (!json.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+                                throw new InvalidOperationException("EitaaYar did not accept the publication.");
+                        }
                     }
                     catch (HttpRequestException)
                     {
@@ -116,7 +136,7 @@ public sealed class ContentPublishingWorker(
                 draft.PublishError = null;
                 draft.UpdatedAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync(ct);
-                logger.LogInformation("Content draft {DraftId} published to Telegram.", draft.Id);
+                logger.LogInformation("Content draft {DraftId} published to {Provider}.", draft.Id, draft.Channel);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
