@@ -78,6 +78,7 @@ public sealed class AutomationWorker(IServiceScopeFactory scopeFactory, ILogger<
                     else if (rule.ActionType == "CreateActivity")
                     {
                         var summary = Expand(rule.ActionValue, contact, lead, draft, inboxMessage);
+                        if (summary.Length > 1000) summary = summary[..1000];
                         var activity = new CrmActivity
                         {
                             OrganizationId = run.OrganizationId, ContactId = contact?.Id ?? lead?.ContactId ?? inboxMessage?.Conversation?.ContactId,
