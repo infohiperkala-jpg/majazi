@@ -281,5 +281,3 @@ public sealed class AutomationRun
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
 }
-
-}
