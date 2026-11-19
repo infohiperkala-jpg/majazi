@@ -20,7 +20,7 @@
 ## Iranian bot channels: Bale and Rubika
 - **Bale:** create a bot with Bale BotFather and store its bot token as the channel credential. The adapter uses the Bale Bot API `getMe`, `sendMessage`, and `setWebhook` methods at `https://tapi.bale.ai/bot{TOKEN}/{METHOD}`.
 - **Rubika:** create a bot using the Rubika bot platform and store its bot token as the channel credential. The adapter uses the Rubika Bot API `getMe`, `sendMessage`, and `updateBotEndpoints` methods at `https://botapi.rubika.ir/v3/{TOKEN}/{METHOD}`; Rubika responses use the `status/data` envelope.
-- In Channels, add the bot, run **Live connection test**, **Verify bot**, then **Activate incoming messages**. The API server must have `PUBLIC_BASE_URL` set to the public HTTPS origin. Webhook URLs are signed per connection and are not shared between organizations.
+- In Channels, add the bot, run **Live connection test**, **Verify bot**, then **Activate incoming messages**. The API server must have `PublicBaseUrl` set to the public HTTPS origin. Webhook URLs are signed per connection and are not shared between organizations.
 - Incoming text messages create Inbox conversations and trigger the existing `InboxMessageReceived` automation. Duplicate provider message IDs are ignored. Text replies are sent through each provider's Bot API.
 - The first adapter scope is text messaging. Media upload/download, channel-wide broadcasts, and provider-specific advanced controls are not implied by this connection.
 
