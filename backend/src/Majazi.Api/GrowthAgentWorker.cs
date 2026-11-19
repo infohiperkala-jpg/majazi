@@ -3,6 +3,8 @@ using System.Text.Json;
 using Majazi.Api.Data;
 using Majazi.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
+using System.Security.Cryptography;
 
 namespace Majazi.Api;
 
@@ -10,6 +12,7 @@ public sealed class GrowthAgentWorker(
     IServiceScopeFactory scopeFactory,
     IHttpClientFactory clients,
     IConfiguration configuration,
+    IDataProtectionProvider protection,
     ILogger<GrowthAgentWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,13 +29,6 @@ public sealed class GrowthAgentWorker(
 
     private async Task RunDueOrganizations(CancellationToken ct)
     {
-        var key = configuration["AI:ApiKey"];
-        var baseUrl = configuration["AI:BaseUrl"]?.TrimEnd('/');
-        var model = configuration["AI:Model"];
-        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(model) ||
-            !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
-            (endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback)) return;
-
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MajaziDbContext>();
         var today = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
@@ -50,6 +46,28 @@ public sealed class GrowthAgentWorker(
 
             try
             {
+                var savedAi = await db.OrganizationAiProviderSettings.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.OrganizationId == id, ct);
+                var key = configuration["AI:ApiKey"];
+                var baseUrl = configuration["AI:BaseUrl"];
+                var model = configuration["AI:Model"];
+                if (savedAi is not null)
+                {
+                    key = null;
+                    if (!string.IsNullOrWhiteSpace(savedAi.EncryptedApiKey))
+                    {
+                        try { key = protection.CreateProtector("Majazi.AIProviderSettings.v1", id.ToString("N")).Unprotect(savedAi.EncryptedApiKey); }
+                        catch (CryptographicException) { key = null; }
+                    }
+                    baseUrl = savedAi.BaseUrl;
+                    model = savedAi.Model;
+                    if (!savedAi.IsEnabled) continue;
+                }
+                baseUrl = baseUrl?.TrimEnd('/');
+                if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(model) ||
+                    !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
+                    (endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback)) continue;
+
                 var org = await db.Organizations.AsNoTracking().Where(x => x.Id == id)
                     .Select(x => new { x.Name }).SingleAsync(ct);
                 var channels = await db.SocialChannelConnections.AsNoTracking()
