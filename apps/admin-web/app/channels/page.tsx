@@ -83,7 +83,13 @@ export default function ChannelsPage() {
       await reload(); setNotice("ربات " + item.provider + " تأیید شد." + (result.username ? " نام کاربری: @" + result.username : ""));
     });
   }
-  async function configureBotWebhook(item: Channel) {\n    await run(async () => {\n      await request("/api/organizations/" + organizationId + "/channels/" + item.id + "/bot-webhook", token, { method: "POST" });\n      setNotice("وب‌هوک امن " + item.provider + " ثبت شد؛ پیام‌های ورودی به صندوق یکپارچه منتقل می‌شوند.");\n    });\n  }\n  async function configureMetaWebhook(item: Channel) {
+  async function configureBotWebhook(item: Channel) {
+    await run(async () => {
+      await request("/api/organizations/" + organizationId + "/channels/" + item.id + "/bot-webhook", token, { method: "POST" });
+      setNotice("وب‌هوک امن " + item.provider + " ثبت شد؛ پیام‌های ورودی به صندوق یکپارچه منتقل می‌شوند.");
+    });
+  }
+  async function configureMetaWebhook(item: Channel) {
     await run(async () => {
       await request("/api/organizations/" + organizationId + "/channels/" + item.id + "/meta-webhook", token, { method: "POST" });
       setNotice("اشتراک وب‌هوک پیام‌های " + item.provider + " در Meta ثبت شد. دریافت پیام‌ها به Inbox منتقل می‌شود.");
