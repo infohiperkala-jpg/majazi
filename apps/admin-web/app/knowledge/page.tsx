@@ -4,8 +4,8 @@ type Org={id:string;name:string;role:string};
 type Article={id:string;title:string;slug:string;summary:string|null;body?:string;category:string;tags:string;status:string;version:number;publishedAt:string|null;createdAt:string;updatedAt:string};
 type Revision={id:string;version:number;title:string;summary:string;body:string;category:string;tags:string;changeNote:string|null;createdAt:string};
 type ListResponse={items:Article[];total:number;page:number;pageSize:number;categories:string[]};
-type Editor={id?:string;title:string;slug:string;summary:string;body:string;category:string;tags:string;version:number;changeNote:string};
-const blank:Editor={title:"",slug:"",summary:"",body:"",category:"عمومی",tags:"",version:0,changeNote:"ایجاد مقاله"};
+type Editor={id?:string;title:string;slug:string;summary:string;body:string;category:string;tags:string;version:number;status:string;changeNote:string};
+const blank:Editor={title:"",slug:"",summary:"",body:"",category:"عمومی",tags:"",version:0,status:"Draft",changeNote:"ایجاد مقاله"};
 async function api<T>(path:string,init?:RequestInit):Promise<T>{const token=localStorage.getItem("majazi_access_token");const r=await fetch("/backend-api"+path,{...init,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...init?.headers},cache:"no-store"});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.error??d?.detail??"درخواست ناموفق بود.");return d as T;}
 const fa=(n:number)=>new Intl.NumberFormat("fa-IR").format(n);
 const statusLabel=(s:string)=>s==="Published"?"منتشرشده":s==="Archived"?"بایگانی":"پیش‌نویس";
@@ -14,7 +14,7 @@ export default function KnowledgePage(){
  const org=orgs.find(x=>x.id===orgId),canPublish=org?.role==="Owner"||org?.role==="Admin";
  const loadOrgs=useCallback(async()=>{try{const x=await api<Org[]>("/api/organizations");setOrgs(x);setOrgId(v=>v&&x.some(y=>y.id===v)?v:x[0]?.id??"");}catch(e){setError(e instanceof Error?e.message:"دریافت سازمان‌ها ناموفق بود.");}},[]);
  const loadList=useCallback(async()=>{if(!orgId){setArticles([]);return;}try{const params=new URLSearchParams({page:"1",pageSize:"100"});if(query.trim())params.set("q",query.trim());if(filter)params.set("category",filter);if(status)params.set("status",status);const d=await api<ListResponse>(`/api/organizations/${orgId}/knowledge/articles?${params}`);setArticles(d.items);setTotal(d.total);setCategories(d.categories);}catch(e){setError(e instanceof Error?e.message:"دریافت دانش‌نامه ناموفق بود.");}},[orgId,query,filter,status]);
- const loadArticle=useCallback(async(id:string)=>{try{const [a,r]=await Promise.all([api<Article>(`/api/organizations/${orgId}/knowledge/articles/${id}`),api<Revision[]>(`/api/organizations/${orgId}/knowledge/articles/${id}/revisions`)]);setEditor({id:a.id,title:a.title,slug:a.slug,summary:a.summary??"",body:a.body??"",category:a.category,tags:a.tags,version:a.version,changeNote:"ویرایش مقاله"});setRevisions(r);setSelected(id);}catch(e){setError(e instanceof Error?e.message:"بازکردن مقاله ناموفق بود.");}},[orgId]);
+ const loadArticle=useCallback(async(id:string)=>{try{const [a,r]=await Promise.all([api<Article>(`/api/organizations/${orgId}/knowledge/articles/${id}`),api<Revision[]>(`/api/organizations/${orgId}/knowledge/articles/${id}/revisions`)]);setEditor({id:a.id,title:a.title,slug:a.slug,summary:a.summary??"",body:a.body??"",category:a.category,tags:a.tags,version:a.version,status:a.status,changeNote:"ویرایش مقاله"});setRevisions(r);setSelected(id);}catch(e){setError(e instanceof Error?e.message:"بازکردن مقاله ناموفق بود.");}},[orgId]);
  useEffect(()=>{void loadOrgs();},[loadOrgs]);useEffect(()=>{void loadList();},[loadList]);
  function set<K extends keyof Editor>(k:K,v:Editor[K]){setEditor(x=>({...x,[k]:v}));}
  function create(){setEditor(blank);setRevisions([]);setSelected("");setError("");setNotice("");}
