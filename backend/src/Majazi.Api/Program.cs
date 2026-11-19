@@ -35,6 +35,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddHttpClient("TelegramBotApi", client => client.Timeout = TimeSpan.FromSeconds(12))
     .ConfigurePrimaryHttpMessageHandler(() => CreateEgressHandler(
         builder.Configuration["Network:TelegramProxy"] ?? builder.Configuration["Network:InternationalDefaultProxy"]));
+builder.Services.AddHttpClient("EitaaYar", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient("MetaOAuth", client => client.Timeout = TimeSpan.FromSeconds(20))
     .ConfigurePrimaryHttpMessageHandler(() => CreateEgressHandler(
         builder.Configuration["Network:MetaProxy"] ?? builder.Configuration["Network:InternationalDefaultProxy"]));
@@ -1200,7 +1201,7 @@ app.MapGet("/api/meta/oauth/callback", async (string? code, string? state, strin
 });
 
 
-var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram", "WhatsApp", "Bale", "Rubika"]);
+var channelProviders = new HashSet<string>(["Instagram", "Facebook", "Telegram", "WhatsApp", "Bale", "Rubika", "Eitaa"]);
 channelsApi.MapGet("/", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -1516,6 +1517,7 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
         if (item.Provider == "Telegram") endpoint = $"https://api.telegram.org/bot{credential}/getMe";
         else if (item.Provider == "Bale") endpoint = $"https://tapi.bale.ai/bot{credential}/getMe";
         else if (item.Provider == "Rubika") endpoint = $"https://botapi.rubika.ir/v3/{credential}/getMe";
+        else if (item.Provider == "Eitaa") endpoint = $"https://eitaayar.ir/api/{Uri.EscapeDataString(credential)}/getMe";
         else if (item.Provider == "Instagram") endpoint = QueryHelpers.AddQueryString("https://graph.instagram.com/me",
             new Dictionary<string, string?> { ["fields"] = "id,user_id,username", ["access_token"] = credential });
         else if (item.Provider == "Facebook")
@@ -1531,9 +1533,10 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
             endpoint = $"https://graph.facebook.com/{version}/{Uri.EscapeDataString(item.ExternalAccountId)}?fields=id,display_phone_number,verified_name";
         }
         else return Results.Conflict(new { error = "برای این پلتفرم هنوز آداپتور رسمی بررسی سلامت پیاده‌سازی نشده است." });
-        using var request = new HttpRequestMessage(item.Provider == "Rubika" ? HttpMethod.Post : HttpMethod.Get, endpoint);
+        using var request = new HttpRequestMessage(item.Provider is "Rubika" or "Eitaa" ? HttpMethod.Post : HttpMethod.Get, endpoint);
+        if (item.Provider == "Eitaa") request.Content = new FormUrlEncodedContent(new Dictionary<string, string>());
         if (item.Provider is "WhatsApp" or "Facebook") request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
-        using var response = await clients.CreateClient(item.Provider is "Telegram" or "Bale" or "Rubika" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
+        using var response = await clients.CreateClient(item.Provider == "Eitaa" ? "EitaaYar" : item.Provider is "Telegram" or "Bale" or "Rubika" ? "TelegramBotApi" : "MetaOAuth").SendAsync(request, ct);
         using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = payload.RootElement;
         var providerOk = response.IsSuccessStatusCode &&
@@ -1541,7 +1544,9 @@ channelsApi.MapPost("/{connectionId:guid}/health-check", async (Guid organizatio
                 ? root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
                 : item.Provider == "Rubika"
                     ? root.TryGetProperty("status", out var rubikaStatus) && rubikaStatus.GetString() == "OK"
-                    : root.TryGetProperty("id", out _));
+                    : item.Provider == "Eitaa"
+                        ? root.TryGetProperty("ok", out var eitaaOk) && eitaaOk.ValueKind == JsonValueKind.True
+                        : root.TryGetProperty("id", out _));
         if (!providerOk)
         {
             item.Status = "VerificationFailed";
@@ -2855,8 +2860,8 @@ contentApi.MapGet("/publish-targets", async (Guid organizationId, ClaimsPrincipa
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
     return Results.Ok(await db.SocialChannelConnections.AsNoTracking()
-        .Where(x => x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected")
-        .Select(x => new { x.Id, x.DisplayName, x.ExternalAccountId }).ToListAsync(ct));
+        .Where(x => x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected")
+        .Select(x => new { x.Id, x.DisplayName, x.ExternalAccountId, x.Provider }).ToListAsync(ct));
 });
 
 contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId, Guid draftId,
@@ -2869,17 +2874,17 @@ contentApi.MapPost("/drafts/{draftId:guid}/schedule", async (Guid organizationId
     var scheduledAt = request.ScheduledAt;
     if (scheduledAt is null || scheduledAt <= DateTimeOffset.UtcNow.AddMinutes(1) || scheduledAt > DateTimeOffset.UtcNow.AddYears(1))
         return Results.BadRequest(new { error = "زمان انتشار باید حداقل یک دقیقه بعد و حداکثر تا یک سال آینده باشد." });
-    if (!IsValidTelegramChatTarget(request.TargetChatId))
-        return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام را وارد کنید." });
+    if (!IsValidTelegramChatTarget(request.TargetChatId) && !IsValidEitaaTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شناسه مقصد معتبر نیست؛ برای تلگرام شناسه عددی یا @username و برای ایتا شناسه عددی یا نام کاربری وارد کنید." });
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
-    if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
+    if (draft.Content.Length > 4096 && draft.Channel == "Telegram") return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
     if (draft.Status != "Approved") return Results.Conflict(new { error = "ابتدا محتوا باید تأیید نهایی شود." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x =>
-        x.Id == request.ConnectionId && x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected", ct);
+        x.Id == request.ConnectionId && x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected", ct);
     if (connection is null || string.IsNullOrWhiteSpace(connection.EncryptedAccessToken))
         return Results.BadRequest(new { error = "اتصال فعال تلگرام انتخاب نشده است." });
-    if (draft.Channel != "Telegram") return Results.BadRequest(new { error = "این محتوا برای کانال دیگری تعریف شده است." });
+    if (draft.Channel != connection.Provider) return Results.BadRequest(new { error = "پلتفرم محتوا باید با پلتفرم اتصال انتخاب‌شده یکسان باشد." });
     draft.Status = "Scheduled"; draft.ScheduledAt = scheduledAt.Value.ToUniversalTime();
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim(); draft.PublishError = null;
     draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2896,14 +2901,15 @@ contentApi.MapPost("/drafts/{draftId:guid}/publish-now", async (Guid organizatio
     if (role is not ("Owner" or "Admin")) return Results.Forbid();
     var draft = await db.ContentDrafts.SingleOrDefaultAsync(x => x.Id == draftId && x.OrganizationId == organizationId, ct);
     if (draft is null) return Results.NotFound();
-    if (draft.Status != "Approved" || draft.Channel != "Telegram")
-        return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام قابل انتشار است." });
-    if (draft.Content.Length > 4096) return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
-    if (!IsValidTelegramChatTarget(request.TargetChatId))
-        return Results.BadRequest(new { error = "شناسه عددی مقصد تلگرام الزامی است." });
+    if (draft.Status != "Approved" || draft.Channel is not ("Telegram" or "Eitaa"))
+        return Results.Conflict(new { error = "فقط محتوای تأییدشده تلگرام یا ایتا قابل انتشار است." });
+    if (draft.Channel == "Telegram" && draft.Content.Length > 4096)
+        return Results.BadRequest(new { error = "متن برای ارسال تلگرام باید حداکثر ۴۰۹۶ نویسه باشد." });
+    if (!IsValidTelegramChatTarget(request.TargetChatId) && !IsValidEitaaTarget(request.TargetChatId))
+        return Results.BadRequest(new { error = "شناسه مقصد معتبر نیست؛ شناسه عددی یا نام کاربری وارد کنید." });
     var connection = await db.SocialChannelConnections.SingleOrDefaultAsync(x => x.Id == request.ConnectionId &&
-        x.OrganizationId == organizationId && x.Provider == "Telegram" && x.Status == "Connected", ct);
-    if (connection is null) return Results.BadRequest(new { error = "اتصال فعال تلگرام یافت نشد." });
+        x.OrganizationId == organizationId && (x.Provider == "Telegram" || x.Provider == "Eitaa") && x.Status == "Connected", ct);
+    if (connection is null || connection.Provider != draft.Channel) return Results.BadRequest(new { error = "اتصال فعال هم‌نوع با پلتفرم محتوا یافت نشد." });
     draft.Status = "Scheduled"; draft.ScheduledAt = DateTimeOffset.UtcNow.AddSeconds(2);
     draft.PublishConnectionId = connection.Id; draft.PublishTarget = request.TargetChatId.Trim();
     draft.PublishError = null; draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -3473,6 +3479,41 @@ inboxApi.MapPost("/conversations/{conversationId:guid}/messages", async (Guid or
         catch (HttpRequestException)
         { return Results.Problem($"ارتباط با API {channel.Provider} برقرار نشد.", statusCode: 502); }
     }
+    // EitaaYar is implemented as outbound-only; no inbound webhook support is claimed.
+    else if (conversation.ChannelConnection?.Provider == "Eitaa")
+    {
+        var channel = conversation.ChannelConnection;
+        if (channel.Status != "Connected" || string.IsNullOrWhiteSpace(channel.EncryptedAccessToken))
+            return Results.Conflict(new { error = "اتصال ایتا متصل و تأییدشده نیست." });
+        if (!IsValidEitaaTarget(conversation.ExternalConversationId))
+            return Results.Conflict(new { error = "شناسه مقصد ایتا معتبر نیست." });
+        if (body.Length > 4096)
+            return Results.BadRequest(new { error = "متن پیام بیش از ۴۰۹۶ نویسه است." });
+        string eitaaToken;
+        try { eitaaToken = protection.CreateProtector("Majazi.SocialConnections.v1").Unprotect(channel.EncryptedAccessToken); }
+        catch (CryptographicException) { return Results.Conflict(new { error = "توکن ایتایار قابل رمزگشایی نیست؛ اتصال را دوباره ثبت کنید." }); }
+        try
+        {
+            var endpoint = $"https://eitaayar.ir/api/{Uri.EscapeDataString(eitaaToken)}/sendMessage";
+            using var response = await httpClientFactory.CreateClient("EitaaYar").PostAsync(endpoint,
+                new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["chat_id"] = conversation.ExternalConversationId!,
+                    ["text"] = body
+                }), ct);
+            using var payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            if (!response.IsSuccessStatusCode || !payload.RootElement.TryGetProperty("ok", out var eitaaOk) || eitaaOk.ValueKind != JsonValueKind.True)
+                return Results.Problem("ایتایار پیام را نپذیرفت؛ شناسه مقصد و دسترسی ربات را بررسی کنید.", statusCode: 502);
+            if (payload.RootElement.TryGetProperty("result", out var result) && result.TryGetProperty("message_id", out var messageId))
+                message.ExternalMessageId = messageId.ToString();
+            message.Status = "Sent";
+            message.SentAt = DateTimeOffset.UtcNow;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { return Results.Problem("ارسال پیام به ایتا در زمان مقرر پاسخ نداد.", statusCode: 504); }
+        catch (HttpRequestException)
+        { return Results.Problem("ارتباط با API ایتایار برقرار نشد.", statusCode: 502); }
+    }
     // Telegram replies are delivered synchronously through the official Bot API.
     // Providers without a delivery adapter remain explicitly queued.
     else if (conversation.ChannelConnection?.Provider == "Telegram")
@@ -3743,6 +3784,14 @@ static bool IsValidTelegramChatTarget(string? target)
     if (value.Length > 180) return false;
     if (long.TryParse(value, out _)) return true;
     return value.Length > 1 && value[0] == '@' && value[1..].All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_');
+}
+
+static bool IsValidEitaaTarget(string? target)
+{
+    if (string.IsNullOrWhiteSpace(target)) return false;
+    var value = target.Trim();
+    return value.Length <= 128 && !value.Any(char.IsWhiteSpace) &&
+        value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '@');
 }
 
 static string TelegramWebhookSecret(string signingKey, Guid connectionId) =>
