@@ -254,6 +254,7 @@ public sealed class MajaziDbContextModelSnapshot : ModelSnapshot
             b.Property<DateTimeOffset?>("CompletedAt").HasColumnType("timestamp with time zone");
             b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
             b.Property<string>("Error").HasMaxLength(1000).HasColumnType("character varying(1000)");
+            b.Property<int>("AttemptCount").HasColumnType("integer");
             b.Property<string>("PayloadJson").IsRequired().HasColumnType("jsonb");
             b.Property<string>("Result").HasMaxLength(1000).HasColumnType("character varying(1000)");
             b.Property<Guid>("RuleId").HasColumnType("uuid");
