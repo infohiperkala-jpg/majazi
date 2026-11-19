@@ -100,7 +100,12 @@ public sealed class ContentPublishingWorker(
                             ["name"] = draft.WhatsAppTemplateName,
                             ["language"] = new { code = draft.WhatsAppTemplateLanguage ?? "en_US" }
                         };
-                        if (parameters.Length > 0)
+                        if (!string.IsNullOrWhiteSpace(draft.WhatsAppTemplateComponentsJson))
+                        {
+                            using var parsedComponents = JsonDocument.Parse(draft.WhatsAppTemplateComponentsJson);
+                            template["components"] = parsedComponents.RootElement.Clone();
+                        }
+                        else if (parameters.Length > 0)
                         {
                             template["components"] = new[]
                             {
