@@ -1358,8 +1358,109 @@ app.MapPost("/api/webhooks/telegram/{connectionId:guid}/{signature}", async (Gui
 
 var aiApi = app.MapGroup("/api/organizations/{organizationId:guid}/ai").RequireAuthorization();
 
+aiApi.MapGet("/settings", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    IConfiguration config, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var saved = await db.OrganizationAiProviderSettings.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.OrganizationId == organizationId, ct);
+    var baseUrl = saved?.BaseUrl ?? config["AI:BaseUrl"];
+    var model = saved?.Model ?? config["AI:Model"];
+    var keyConfigured = saved is null
+        ? !string.IsNullOrWhiteSpace(config["AI:ApiKey"])
+        : !string.IsNullOrWhiteSpace(saved.EncryptedApiKey);
+    return Results.Ok(new
+    {
+        baseUrl, model, keyConfigured, isEnabled = saved?.IsEnabled ?? true,
+        source = saved is null ? "server-environment" : "organization"
+    });
+});
+
+aiApi.MapPut("/settings", async (Guid organizationId, OrganizationAiProviderSettingsRequest request,
+    ClaimsPrincipal principal, MajaziDbContext db, IDataProtectionProvider protection, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.SingleOrDefaultAsync(
+        x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+
+    var baseUrl = request.BaseUrl?.Trim().TrimEnd('/');
+    var model = request.Model?.Trim();
+    if (string.IsNullOrWhiteSpace(baseUrl) || baseUrl.Length > 500 ||
+        !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
+        (endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback) ||
+        !string.IsNullOrEmpty(endpoint.UserInfo) ||
+        string.IsNullOrWhiteSpace(model) || model.Length > 160 ||
+        (request.ApiKey?.Length ?? 0) > 8000 ||
+        (!string.IsNullOrWhiteSpace(request.ApiKey) && request.ApiKey.Trim().Length < 8))
+        return Results.BadRequest(new { error = "نشانی امن سرویس، نام مدل یا کلید API معتبر نیست." });
+
+    var saved = await db.OrganizationAiProviderSettings.SingleOrDefaultAsync(x => x.OrganizationId == organizationId, ct);
+    if (saved is null)
+    {
+        saved = new OrganizationAiProviderSetting { OrganizationId = organizationId, BaseUrl = baseUrl, Model = model, UpdatedByUserId = userId.Value };
+        db.OrganizationAiProviderSettings.Add(saved);
+    }
+    saved.BaseUrl = baseUrl;
+    saved.Model = model;
+    saved.IsEnabled = request.IsEnabled;
+    saved.UpdatedByUserId = userId.Value;
+    saved.UpdatedAt = DateTimeOffset.UtcNow;
+    if (request.ClearApiKey) saved.EncryptedApiKey = null;
+    else if (!string.IsNullOrWhiteSpace(request.ApiKey))
+        saved.EncryptedApiKey = protection.CreateProtector("Majazi.AIProviderSettings.v1", organizationId.ToString("N")).Protect(request.ApiKey.Trim());
+
+    RecordAuditEvent(db, organizationId, userId.Value, "ai.settings_updated", "AiProviderSettings", saved.Id,
+        "تنظیمات اتصال هوش مصنوعی سازمان به‌روزرسانی شد.", new { saved.BaseUrl, saved.Model, saved.IsEnabled, keyChanged = !string.IsNullOrWhiteSpace(request.ApiKey) || request.ClearApiKey });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { saved.BaseUrl, saved.Model, isEnabled = saved.IsEnabled, keyConfigured = !string.IsNullOrWhiteSpace(saved.EncryptedApiKey) });
+});
+
+aiApi.MapPost("/test", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    IDataProtectionProvider protection, IConfiguration config, IHttpClientFactory clients, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null) return Results.Unauthorized();
+    var membership = await db.OrganizationMemberships.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, ct);
+    if (membership is null) return Results.NotFound();
+    if (membership.Role is not ("Owner" or "Admin")) return Results.Forbid();
+    var provider = await ResolveAiProviderConfigAsync(db, protection, config, organizationId, ct);
+    if (!provider.Enabled || string.IsNullOrWhiteSpace(provider.ApiKey) || string.IsNullOrWhiteSpace(provider.BaseUrl) || string.IsNullOrWhiteSpace(provider.Model))
+        return Results.Problem("تنظیمات فعال و کلید API معتبر برای این سازمان ثبت نشده است.", statusCode: 503);
+    try
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, provider.BaseUrl.TrimEnd('/') + "/chat/completions");
+        message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        message.Content = JsonContent.Create(new
+        {
+            model = provider.Model, temperature = 0,
+            messages = new[] { new { role = "user", content = "Reply with exactly: MAJAZI_OK" } },
+            max_tokens = 12
+        });
+        using var response = await clients.CreateClient("AIProvider").SendAsync(message, ct);
+        if (!response.IsSuccessStatusCode)
+            return Results.Problem("آزمون اتصال ناموفق بود (HTTP " + (int)response.StatusCode + "). کلید، مدل و نشانی API را بررسی کنید.", statusCode: 502);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var output = document.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        return Results.Ok(new { success = !string.IsNullOrWhiteSpace(output), model = provider.Model, message = "ارتباط با مدل برقرار شد." });
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+    catch (Exception)
+    {
+        return Results.Problem("ارتباط با سرویس برقرار نشد؛ شبکه خروجی، پراکسی و تنظیمات API را بررسی کنید.", statusCode: 502);
+    }
+});
+
 aiApi.MapPost("/generate-text", async (Guid organizationId, GenerateAssistantTextRequest request,
-    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IHttpClientFactory clients, CancellationToken ct) =>
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection, IHttpClientFactory clients, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
     if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
@@ -1380,13 +1481,14 @@ aiApi.MapPost("/generate-text", async (Guid organizationId, GenerateAssistantTex
         string.IsNullOrWhiteSpace(context) || context.Length > 1500 || (currentText?.Length ?? 0) > 5000 ||
         (instructions?.Length ?? 0) > 2000)
         return Results.BadRequest(new { error = "نوع متن یا اطلاعات زمینه معتبر نیست." });
-    var apiKey = config["AI:ApiKey"];
-    var baseUrl = config["AI:BaseUrl"]?.TrimEnd('/');
-    var model = config["AI:Model"];
-    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl) ||
+    var provider = await ResolveAiProviderConfigAsync(db, protection, config, organizationId, ct);
+    var apiKey = provider.ApiKey;
+    var baseUrl = provider.BaseUrl?.TrimEnd('/');
+    var model = provider.Model;
+    if (!provider.Enabled || string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl) ||
         !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
         endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback || string.IsNullOrWhiteSpace(model))
-        return Results.Problem("اتصال هوش مصنوعی پیکربندی نشده است.", statusCode: 503);
+        return Results.Problem("اتصال هوش مصنوعی برای این سازمان پیکربندی یا فعال نشده است.", statusCode: 503);
     var systemPrompt = "شما دستیار حرفه‌ای نگارش فارسی برای یک سامانه مدیریت کسب‌وکار هستید. متن روشن، دقیق، طبیعی، کاربردی و متناسب با زمینه بنویسید. اطلاعات، عدد، نام، وعده یا ادعای تأییدنشده اختراع نکنید. خروجی را فقط به شکل JSON با کلید text برگردانید.";
     var userPrompt = $"ماژول: {module}\nفیلد: {field}\nزمینه: {context}\nمتن فعلی برای بازنویسی: {currentText ?? "وجود ندارد"}\nدستور کاربر: {instructions ?? "یک متن آماده و حرفه‌ای بنویس."}\nفقط متن نهایی قابل ویرایش را تولید کن.";
     try
@@ -1911,20 +2013,21 @@ growthAgentApi.MapPut("/", async (Guid organizationId, GrowthAgentSettingsReques
 });
 
 
-contentApi.MapGet("/ai/status", (IConfiguration config) =>
+contentApi.MapGet("/ai/status", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
+    IDataProtectionProvider protection, IConfiguration config, CancellationToken ct) =>
 {
-    var baseUrl = config["AI:BaseUrl"]?.Trim();
-    var model = config["AI:Model"]?.Trim();
-    var keyStored = !string.IsNullOrWhiteSpace(config["AI:ApiKey"]);
-    var endpointValid = Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) &&
-        (endpoint.Scheme == Uri.UriSchemeHttps || endpoint.IsLoopback);
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var provider = await ResolveAiProviderConfigAsync(db, protection, config, organizationId, ct);
+    var endpointValid = Uri.TryCreate(provider.BaseUrl, UriKind.Absolute, out var endpoint) &&
+        (endpoint.Scheme == Uri.UriSchemeHttps || endpoint.IsLoopback) && string.IsNullOrEmpty(endpoint.UserInfo);
+    var keyStored = !string.IsNullOrWhiteSpace(provider.ApiKey);
     return Results.Ok(new
     {
-        configured = keyStored && endpointValid && !string.IsNullOrWhiteSpace(model),
-        model = string.IsNullOrWhiteSpace(model) ? "not-configured" : model,
-        provider = "OpenAI-compatible",
-        keyStored,
-        endpointValid
+        configured = provider.Enabled && keyStored && endpointValid && !string.IsNullOrWhiteSpace(provider.Model),
+        model = string.IsNullOrWhiteSpace(provider.Model) ? "not-configured" : provider.Model,
+        provider = "OpenAI-compatible", keyStored, endpointValid, enabled = provider.Enabled,
+        source = provider.OrganizationConfigured ? "organization" : "server-environment"
     });
 });
 
@@ -2081,7 +2184,7 @@ contentApi.MapPost("/drafts", async (Guid organizationId, CreateManualContentDra
 });
 
 contentApi.MapPost("/generate", async (Guid organizationId, GenerateContentRequest request,
-    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config,
+    ClaimsPrincipal principal, MajaziDbContext db, IConfiguration config, IDataProtectionProvider protection,
     IHttpClientFactory clients, CancellationToken ct) =>
 {
     var userId = CurrentUserId(principal);
@@ -2093,13 +2196,14 @@ contentApi.MapPost("/generate", async (Guid organizationId, GenerateContentReque
     if (string.IsNullOrWhiteSpace(topic) || topic.Length > 1500 || channel.Length > 40 ||
         tone.Length > 40 || (prompt?.Length ?? 0) > 4000)
         return Results.BadRequest(new { error = "موضوع، لحن، کانال یا دستور تکمیلی معتبر نیست." });
-    var apiKey = config["AI:ApiKey"];
-    var baseUrl = config["AI:BaseUrl"]?.TrimEnd('/');
-    var model = config["AI:Model"];
-    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl) ||
+    var provider = await ResolveAiProviderConfigAsync(db, protection, config, organizationId, ct);
+    var apiKey = provider.ApiKey;
+    var baseUrl = provider.BaseUrl?.TrimEnd('/');
+    var model = provider.Model;
+    if (!provider.Enabled || string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl) ||
         !Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) ||
         endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback)
-        return Results.Problem("اتصال هوش مصنوعی پیکربندی نشده است. AI__BaseUrl، AI__ApiKey و AI__Model را در تنظیمات امن سرور تنظیم کنید.", statusCode: 503);
+        return Results.Problem("اتصال هوش مصنوعی برای این سازمان پیکربندی یا فعال نشده است.", statusCode: 503);
     if (string.IsNullOrWhiteSpace(model)) return Results.Problem("مدل هوش مصنوعی مشخص نشده است.", statusCode: 503);
     var brandName = request.BrandId is Guid brandId
         ? await db.Brands.Where(x => x.Id == brandId && x.OrganizationId == organizationId).Select(x => x.Name).SingleOrDefaultAsync(ct)
@@ -2506,6 +2610,24 @@ app.Run();
 
 
 
+static async Task<AiProviderConfig> ResolveAiProviderConfigAsync(MajaziDbContext db, IDataProtectionProvider protection,
+    IConfiguration config, Guid organizationId, CancellationToken ct)
+{
+    var saved = await db.OrganizationAiProviderSettings.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.OrganizationId == organizationId, ct);
+    if (saved is null)
+        return new AiProviderConfig(config["AI:ApiKey"], config["AI:BaseUrl"], config["AI:Model"], true, false);
+    string? key = null;
+    if (!string.IsNullOrWhiteSpace(saved.EncryptedApiKey))
+    {
+        try { key = protection.CreateProtector("Majazi.AIProviderSettings.v1", organizationId.ToString("N")).Unprotect(saved.EncryptedApiKey); }
+        catch (CryptographicException) { key = null; }
+    }
+    return new AiProviderConfig(key, saved.BaseUrl, saved.Model, saved.IsEnabled, true);
+}
+
+public sealed record AiProviderConfig(string? ApiKey, string? BaseUrl, string? Model, bool Enabled, bool OrganizationConfigured);
+
 static void RecordAuditEvent(MajaziDbContext db, Guid organizationId, Guid? actorUserId,
     string action, string entityType, Guid? entityId, string summary, object? metadata = null)
 {
@@ -2637,3 +2759,4 @@ public sealed record AutomationRuleRequest(string? Name, string? Trigger, string
 public sealed record KnowledgeArticleRequest(string? Title, string? Slug, string? Summary, string? Body, string? Category, string? Tags, int Version = 0, string? ChangeNote = null);
 public sealed record KnowledgeArticleStatusRequest(string? Status);
 public sealed record KnowledgeRestoreRequest(int Version, string? ChangeNote);
+public sealed record OrganizationAiProviderSettingsRequest(string? BaseUrl, string? Model, string? ApiKey, bool ClearApiKey, bool IsEnabled);
