@@ -357,8 +357,11 @@ organizationsApi.MapGet("/{id:guid}/audit-events", async (
     var total = await query.CountAsync(ct);
     var items = await query.OrderByDescending(x => x.CreatedAt)
         .Skip((currentPage - 1) * size).Take(size)
-        .Join(db.Users.AsNoTracking(), e => e.ActorUserId, u => (Guid?)u.Id,
-            (e, u) => new { e.Id, e.Action, e.EntityType, e.EntityId, e.Summary, e.MetadataJson, e.CreatedAt, ActorEmail = u.Email })
+        .Select(e => new
+        {
+            e.Id, e.Action, e.EntityType, e.EntityId, e.Summary, e.MetadataJson, e.CreatedAt,
+            ActorEmail = db.Users.AsNoTracking().Where(u => e.ActorUserId == u.Id).Select(u => u.Email).FirstOrDefault()
+        })
         .ToListAsync(ct);
     var actions = await db.OrganizationAuditEvents.AsNoTracking().Where(x => x.OrganizationId == id)
         .Select(x => x.Action).Distinct().OrderBy(x => x).ToListAsync(ct);
