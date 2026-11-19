@@ -2786,6 +2786,18 @@ contentApi.MapPost("/drafts/{draftId:guid}/reject", async (Guid organizationId, 
 
 var inboxApi = app.MapGroup("/api/organizations/{organizationId:guid}/inbox").RequireAuthorization();
 
+inboxApi.MapGet("/assignees", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db, CancellationToken ct) =>
+{
+    var userId = CurrentUserId(principal);
+    if (userId is null || !await IsMember(db, userId.Value, organizationId, ct)) return Results.NotFound();
+    var members = await db.OrganizationMemberships.AsNoTracking()
+        .Where(x => x.OrganizationId == organizationId && x.User != null && x.User.IsActive)
+        .OrderBy(x => x.User!.Email)
+        .Select(x => new { id = x.UserId, email = x.User!.Email, role = x.Role })
+        .ToListAsync(ct);
+    return Results.Ok(members);
+});
+
 inboxApi.MapGet("/conversations", async (Guid organizationId, ClaimsPrincipal principal, MajaziDbContext db,
     string? status, string? q, int? page, int? pageSize, CancellationToken ct) =>
 {
