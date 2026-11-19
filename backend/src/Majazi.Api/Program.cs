@@ -1862,7 +1862,7 @@ static SocketsHttpHandler CreateEgressHandler(string? proxyAddress)
 static async Task<bool> IsAllowedConfiguredStatus(MajaziDbContext db, Guid organizationId, string module, string status, HashSet<string> fallback, CancellationToken ct)
 {
     var definitions = db.StatusDefinitions.Where(x => x.OrganizationId == organizationId && x.Module == module);
-    if (!await definitions.AnyAsync(ct)) return fallback.Contains(status);
+    if (!await definitions.AnyAsync(ct)) return fallback.Contains(status, StringComparer.OrdinalIgnoreCase);
     return await definitions.AnyAsync(x => x.IsActive && x.Key.ToLower() == status.ToLower(), ct);
 }
 
